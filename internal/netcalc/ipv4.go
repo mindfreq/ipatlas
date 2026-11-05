@@ -50,8 +50,13 @@ func ParseIPv4CIDR(s string) (IPv4Subnet, error) {
 		return IPv4Subnet{}, fmt.Errorf("netcalc: %w: %q", ErrNotIPv4, s)
 	}
 
-	bits := p.Bits()
-	network := p.Masked().Addr()
+	return subnetFrom(p.Addr(), p.Bits()), nil
+}
+
+// subnetFrom builds the address plan for an IPv4 address and prefix length.
+// The caller must pass an IPv4 address.
+func subnetFrom(address netip.Addr, bits int) IPv4Subnet {
+	network := netip.PrefixFrom(address, bits).Masked().Addr()
 	ip := addrToUint32(network)
 	mask := prefixMask(bits)
 	wildcard := ^mask
@@ -74,7 +79,7 @@ func ParseIPv4CIDR(s string) (IPv4Subnet, error) {
 	}
 
 	return IPv4Subnet{
-		Address:   p.Addr(),
+		Address:   address,
 		Network:   network,
 		Prefix:    bits,
 		Mask:      addrFromUint32(mask),
@@ -84,7 +89,7 @@ func ParseIPv4CIDR(s string) (IPv4Subnet, error) {
 		Last:      last,
 		Gateway:   first,
 		Usable:    usable,
-	}, nil
+	}
 }
 
 func prefixMask(bits int) uint32 {
