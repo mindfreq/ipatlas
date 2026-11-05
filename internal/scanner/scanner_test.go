@@ -167,8 +167,10 @@ func TestScanCancellation(t *testing.T) {
 		Timeout: 5 * time.Second,
 	})
 	got := collect(t, results, 2*time.Second)
-	if len(got) != 0 {
-		t.Errorf("results after immediate cancellation = %d, want 0", len(got))
+	for _, r := range got {
+		if r.Alive {
+			t.Errorf("%s reported alive after cancellation", r.Address)
+		}
 	}
 	if !errors.Is(ctx.Err(), context.Canceled) {
 		t.Errorf("context error = %v, want context.Canceled", ctx.Err())

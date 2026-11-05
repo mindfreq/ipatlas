@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"log"
 	"path/filepath"
 
@@ -10,6 +11,9 @@ import (
 	"ipatlas/internal/ipam"
 	appui "ipatlas/ui"
 )
+
+//go:embed resources/icon.png
+var iconPNG []byte
 
 func main() {
 	mygo.App.SetName("IPatlas")
@@ -27,7 +31,7 @@ func main() {
 			a.SetStore(store)
 		}
 
-		mygo.NewWindow(mygo.WindowOptions{
+		win := mygo.NewWindow(mygo.WindowOptions{
 			Title:     "IPatlas",
 			Width:     1100,
 			Height:    720,
@@ -38,15 +42,18 @@ func main() {
 			// The window shows the interface MyGo draws, not a web page.
 			Content: myui.View(a.View),
 		})
+		if err := win.SetIcon(iconPNG); err != nil {
+			log.Printf("window icon: %v", err)
+		}
 
-		if store != nil {
-			mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
-				a.StopScan()
+		mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
+			a.StopScan()
+			if store != nil {
 				if err := store.Close(); err != nil {
 					log.Printf("ipam: close: %v", err)
 				}
-			})
-		}
+			}
+		})
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)

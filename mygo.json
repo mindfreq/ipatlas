@@ -1,6 +1,6 @@
 {
-  "name": "ipatlas",
-  "identifier": "com.example.ipatlas",
+  "name": "IPatlas",
+  "identifier": "com.ipatlas.app",
   "version": "0.1.0",
   "out": "build"
 }
