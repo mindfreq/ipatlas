@@ -42,6 +42,7 @@ type App struct {
 	tab  int
 	ipv4 ipv4State
 	vlsm vlsmState
+	ipv6 ipv6State
 }
 
 // New returns an application with the IPv4 tab selected.
@@ -75,6 +76,10 @@ func (a *App) sectionView(c *myui.Context) {
 	}
 	if a.tab == 1 {
 		a.vlsmView(c)
+		return
+	}
+	if a.tab == 2 {
+		a.ipv6View(c)
 		return
 	}
 
