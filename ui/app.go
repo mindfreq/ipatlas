@@ -4,6 +4,8 @@ package ui
 
 import (
 	myui "github.com/egoist/mygo/ui"
+
+	"ipatlas/internal/ipam"
 )
 
 var tabLabels = []string{"IPv4", "VLSM", "IPv6", "IPAM", "Scan"}
@@ -43,13 +45,26 @@ type App struct {
 	ipv4 ipv4State
 	vlsm vlsmState
 	ipv6 ipv6State
+	ipam ipamState
 }
 
-// New returns an application with the IPv4 tab selected.
+// New returns an application without an IPAM database. The app attaches one
+// with SetStore once the user data directory is available.
 func New() *App {
+	return NewWithStore(nil)
+}
+
+// NewWithStore returns an application backed by store, which may be nil.
+func NewWithStore(store *ipam.Store) *App {
 	a := &App{}
 	a.vlsm.addRow()
+	a.ipam.attach(store)
 	return a
+}
+
+// SetStore attaches the IPAM database and loads its saved networks.
+func (a *App) SetStore(store *ipam.Store) {
+	a.ipam.attach(store)
 }
 
 // View builds the application shell and the selected section.
@@ -80,6 +95,10 @@ func (a *App) sectionView(c *myui.Context) {
 	}
 	if a.tab == 2 {
 		a.ipv6View(c)
+		return
+	}
+	if a.tab == 3 {
+		a.ipamView(c)
 		return
 	}
 
