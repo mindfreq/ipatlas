@@ -32,6 +32,8 @@ type ipamState struct {
 	renaming   bool
 	renameName string
 	renameErr  string
+
+	confirmDelete bool
 }
 
 func (s *ipamState) attach(store *ipam.Store) {
@@ -103,6 +105,7 @@ func (s *ipamState) selectNetwork(id int64) {
 	s.offset = 0
 	s.clearEdit()
 	s.cancelRename()
+	s.confirmDelete = false
 	s.loadPage()
 }
 
@@ -241,6 +244,18 @@ func (s *ipamState) rename() {
 	s.refresh()
 }
 
+// beginDelete opens the confirmation dialog for the current network.
+func (s *ipamState) beginDelete() {
+	if s.current() == nil {
+		return
+	}
+	s.confirmDelete = true
+}
+
+func (s *ipamState) cancelDelete() {
+	s.confirmDelete = false
+}
+
 func (s *ipamState) deleteNetwork() {
 	if s.store == nil {
 		s.err = "The IPAM database is unavailable."
@@ -250,9 +265,11 @@ func (s *ipamState) deleteNetwork() {
 		return
 	}
 	if err := s.store.DeleteNetwork(s.network); err != nil {
+		s.confirmDelete = false // close the dialog so the alert behind it is visible
 		s.err = "Could not delete the network: " + err.Error()
 		return
 	}
+	s.confirmDelete = false
 	s.network = 0
 	s.offset = 0
 	s.clearEdit()
@@ -294,6 +311,30 @@ func (a *App) ipamView(c *myui.Context) {
 				"Calculate an IPv4 block and save it to start the inventory.",
 				"Use the IPv4 calculator's Save to IPAM action.")
 		}
+	})
+	a.ipamDeleteDialog(c)
+}
+
+// ipamDeleteDialog builds the confirmation dialog shown before a network is
+// deleted. It must be built every frame; Modal watches the *bool itself.
+func (a *App) ipamDeleteDialog(c *myui.Context) {
+	s := &a.ipam
+	t := c.Theme()
+	myui.Modal(c, &s.confirmDelete, func() {
+		n := s.current()
+		myui.Column(c).Gap(spaceS).Children(func() {
+			myui.Text(c, "Delete network?").FontSize(15).FontWeight(650)
+			if n != nil {
+				myui.Text(c, fmt.Sprintf(
+					"\"%s\" (%s) and its %d assignments will be deleted permanently. This cannot be undone.",
+					n.Name, n.CIDR, s.stats.Used,
+				)).FontSize(12.5).TextColor(t.TextMuted)
+			}
+			myui.Row(c).Gap(spaceS).Justify(myui.End).Children(func() {
+				myui.Button(c, "Cancel").OnClick(s.cancelDelete)
+				myui.Button(c, "Delete network").TextColor(t.Danger).OnClick(s.deleteNetwork)
+			})
+		})
 	})
 }
 
@@ -337,7 +378,7 @@ func (a *App) ipamNetwork(c *myui.Context, n *ipam.Network) {
 			pill(c, fmt.Sprintf("%d used", s.stats.Used), t.Accent)
 			pill(c, fmt.Sprintf("%d free", s.stats.Free), t.Success)
 			myui.Button(c, "Rename network").OnClick(s.beginRename)
-			myui.Button(c, "Delete network").TextColor(t.Danger).OnClick(s.deleteNetwork)
+			myui.Button(c, "Delete network").TextColor(t.Danger).OnClick(s.beginDelete)
 		})
 
 		if s.renaming {

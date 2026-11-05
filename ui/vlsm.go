@@ -150,8 +150,8 @@ func (a *App) vlsmView(c *myui.Context) {
 	t := c.Theme()
 	myui.Scroll(c).Grow(1).Children(func() {
 		myui.Column(c).Gap(spaceL).Children(func() {
-				card(c, func() {
-					cardHeader(c, "The block to divide", "Every department is allocated from this network.", nil)
+			card(c, func() {
+				cardHeader(c, "The block to divide", "Every department is allocated from this network.", nil)
 				myui.Row(c).Gap(spaceS).AlignItems(myui.Center).Wrap().Children(func() {
 					input := myui.TextInput(c, &s.parent).
 						Placeholder("192.168.1.0/24").
