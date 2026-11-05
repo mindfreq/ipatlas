@@ -246,6 +246,30 @@ func (s *Store) SaveNetwork(cidr, name string) (Network, error) {
 	return s.Network(normalized)
 }
 
+// RenameNetwork updates the name of the saved network with the given ID. An
+// empty name falls back to the network's CIDR, as SaveNetwork does.
+func (s *Store) RenameNetwork(id int64, name string) (Network, error) {
+	if err := s.check(); err != nil {
+		return Network{}, err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		n, err := s.Network(id)
+		if err != nil {
+			return Network{}, err
+		}
+		name = n.CIDR
+	}
+	result, err := s.db.Exec(`UPDATE networks SET name = ? WHERE id = ?`, name, id)
+	if err != nil {
+		return Network{}, fmt.Errorf("ipam: rename network: %w", err)
+	}
+	if rows, err := result.RowsAffected(); err == nil && rows == 0 {
+		return Network{}, fmt.Errorf("ipam: rename network: %w", ErrNetworkNotFound)
+	}
+	return s.Network(id)
+}
+
 // Network returns the saved network with the given ID or normalized CIDR.
 func (s *Store) Network(idOrCIDR any) (Network, error) {
 	if err := s.check(); err != nil {

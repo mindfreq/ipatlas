@@ -316,26 +316,31 @@ func (a *App) scanView(c *myui.Context) {
 	services := c.Services()
 	snap := s.snapshot()
 
-	myui.Column(c).Fill().Gap(12).Children(func() {
-		myui.Text(c, "Live scan").FontSize(20).Bold()
-		myui.Text(c, "Probe a network with TCP connects; addresses update as results arrive.").TextColor(t.TextMuted)
-
-		myui.Row(c).Gap(8).AlignItems(myui.Center).Children(func() {
-			myui.TextInput(c, &s.cidr).Label("Scan target").Placeholder("192.168.1.0/24").Width(280)
-			myui.Checkbox(c, &s.icmp, "Try ICMP when TCP finds nothing")
-			scanButton := myui.PrimaryButton(c, "Start scan").OnClick(func() {
-				a.StartScan(services.Invalidate)
+	myui.Column(c).Grow(1).Gap(spaceL).Children(func() {
+		card(c, func() {
+			cardHeader(c, "Scan settings",
+				"Probe a network with TCP connects; results arrive host by host.", nil)
+			myui.Row(c).Gap(spaceM).AlignItems(myui.Center).Wrap().Children(func() {
+				myui.TextInput(c, &s.cidr).Label("Scan target").Placeholder("192.168.1.0/24").Width(280)
+				myui.Checkbox(c, &s.icmp, "Try ICMP when TCP finds nothing")
+				scanButton := myui.PrimaryButton(c, "Start scan").OnClick(func() {
+					a.StartScan(services.Invalidate)
+				})
+				scanButton.Disabled(snap.running)
+				stopButton := myui.Button(c, "Stop scan").OnClick(a.StopScan)
+				stopButton.Disabled(!snap.running)
 			})
-			scanButton.Disabled(snap.running)
-			stopButton := myui.Button(c, "Stop scan").OnClick(a.StopScan)
-			stopButton.Disabled(!snap.running)
+			if snap.err != "" {
+				alert(c, snap.err, t.Danger)
+			}
 		})
 
-		if snap.err != "" {
-			myui.Text(c, snap.err).TextColor(t.Danger).Selectable()
-		}
 		if snap.total > 0 {
 			a.scanResults(c, snap)
+		} else if snap.err == "" {
+			emptyState(c, "No scan yet",
+				"Enter a target network above and start a scan.",
+				"Up to 4096 addresses are probed at once, using a bounded worker pool.")
 		}
 	})
 }
@@ -350,52 +355,45 @@ func (a *App) scanResults(c *myui.Context, snap scanSnapshot) {
 		status = fmt.Sprintf("Stopped after %d of %d addresses", snap.done, snap.total)
 	}
 
-	myui.Column(c).Grow(1).Gap(8).Children(func() {
-		myui.Row(c).Gap(12).AlignItems(myui.Center).Children(func() {
-			myui.Text(c, status).Bold()
-			myui.Text(c, fmt.Sprintf(
-				"%d alive, %d documented but silent, %d no answer",
-				snap.alive, snap.documented, snap.noAnswer,
-			)).TextColor(t.TextMuted)
-			if left := snap.total - snap.done; left > 0 && !snap.running {
-				myui.Text(c, fmt.Sprintf("%d not scanned", left)).TextColor(t.Warning)
-			}
+	result := card(c, func() {
+		cardHeader(c, status, fmt.Sprintf(
+			"%d alive, %d documented but silent, %d no answer",
+			snap.alive, snap.documented, snap.noAnswer,
+		), nil)
+
+		myui.Row(c).Gap(spaceS).Children(func() {
+			statTile(c, "alive", fmt.Sprintf("%d", snap.alive), t.Success)
+			statTile(c, "documented but silent", fmt.Sprintf("%d", snap.documented), t.Warning)
+			statTile(c, "no answer", fmt.Sprintf("%d", snap.noAnswer), t.TextMuted)
 		})
 
 		a.scanProgress(c, snap)
+		if left := snap.total - snap.done; left > 0 && !snap.running {
+			alert(c, fmt.Sprintf("%d not scanned", left), t.Warning)
+		}
 		a.scanLegend(c)
 		a.scanGrid(c, snap)
 	})
+	result.Grow(1)
 }
 
 func (a *App) scanProgress(c *myui.Context, snap scanSnapshot) {
-	t := c.Theme()
-	if snap.total == 0 {
-		return
-	}
 	done := snap.done
 	if done > snap.total {
 		done = snap.total
 	}
-	myui.Row(c).Height(10).Children(func() {
-		if done > 0 {
-			myui.Box(c).Height(10).Grow(float32(done)).Background(t.Accent)
-		}
-		if remaining := snap.total - done; remaining > 0 {
-			myui.Box(c).Height(10).Grow(float32(remaining)).Background(t.SurfacePressed)
-		}
-	})
+	progressBar(c, float32(done), float32(snap.total))
 }
 
 func (a *App) scanLegend(c *myui.Context) {
 	t := c.Theme()
 	legend := func(color myui.Color, label string) {
-		myui.Row(c).Gap(4).AlignItems(myui.Center).Children(func() {
-			myui.Box(c).Width(8).Height(8).Radius(2).Background(color)
+		myui.Row(c).Gap(6).AlignItems(myui.Center).Children(func() {
+			dot(c, color)
 			myui.Text(c, label).FontSize(11).TextColor(t.TextMuted)
 		})
 	}
-	myui.Row(c).Gap(14).Children(func() {
+	myui.Row(c).Gap(spaceL).AlignItems(myui.Center).Wrap().Children(func() {
 		legend(t.Success, "alive")
 		legend(t.Warning, "documented but silent")
 		legend(t.TextMuted, "no answer")
@@ -404,16 +402,17 @@ func (a *App) scanLegend(c *myui.Context) {
 
 func (a *App) scanGrid(c *myui.Context, snap scanSnapshot) {
 	t := c.Theme()
-	myui.Scroll(c).Grow(1).Children(func() {
-		myui.Grid(c).Columns(6).Gap(4).Children(func() {
+	myui.Scroll(c).Grow(1).MinHeight(120).Children(func() {
+		myui.Grid(c).Columns(columnsFor(c, 190, 6)).Gap(spaceS).Children(func() {
 			for _, host := range snap.hosts {
 				host := host
-				myui.Column(c).Key(host.Addr.String()).Gap(2).Children(func() {
-					myui.Row(c).Gap(4).AlignItems(myui.Center).Children(func() {
-						myui.Box(c).Width(8).Height(8).Radius(2).Background(scanColor(t, host.State))
-						myui.Text(c, host.Addr.String()).FontSize(12).TextColor(scanColor(t, host.State))
+				color := scanColor(t, host.State)
+				tile(c, host.Addr.String(), func() {
+					myui.Row(c).Gap(6).AlignItems(myui.Center).Children(func() {
+						dot(c, color)
+						myui.Text(c, host.Addr.String()).FontSize(11.5).TextColor(color)
 					})
-					myui.Text(c, scanDetail(host)).FontSize(11).SingleLine().TextColor(t.TextMuted)
+					myui.Text(c, scanDetail(host)).FontSize(10).SingleLine().TextColor(t.TextMuted)
 				})
 			}
 		})

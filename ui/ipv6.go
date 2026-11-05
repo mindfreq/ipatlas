@@ -125,85 +125,106 @@ func (s *ipv6State) previousPage() {
 
 func (a *App) ipv6View(c *myui.Context) {
 	t := c.Theme()
-	myui.Column(c).Fill().Gap(14).Children(func() {
-		myui.Text(c, "IPv6 tools").FontSize(20).Bold()
-		myui.Text(c, "Inspect an address, then split a prefix page by page.").TextColor(t.TextMuted)
-		a.ipv6Address(c)
-		a.ipv6Split(c)
+	myui.Scroll(c).Grow(1).Children(func() {
+		myui.Column(c).Gap(spaceL).Children(func() {
+			myui.Row(c).Wrap().Gap(spaceL).AlignItems(myui.Stretch).Children(func() {
+				a.ipv6Address(c)
+				a.ipv6Split(c)
+			})
+			if a.ipv6.split != nil {
+				a.ipv6Page(c)
+			} else if a.ipv6.splitErr == "" && a.ipv6.info == nil && a.ipv6.addressErr == "" {
+				myui.Text(c, "Inspect an address or split a prefix to begin.").
+					FontSize(12).TextColor(t.TextMuted)
+			}
+		})
 	})
 }
 
 func (a *App) ipv6Address(c *myui.Context) {
 	s := &a.ipv6
 	t := c.Theme()
-	myui.Column(c).Gap(8).Children(func() {
-		myui.Text(c, "Address").FontSize(16).Bold()
-		myui.Row(c).Gap(8).AlignItems(myui.Center).Children(func() {
-			myui.TextInput(c, &s.address).Placeholder("2001:db8::1").Label("IPv6 address").Width(360)
+	address := card(c, func() {
+		cardHeader(c, "Address inspector", "Compress, expand and classify any IPv6 address.", nil)
+		myui.Row(c).Gap(spaceS).AlignItems(myui.Center).Children(func() {
+			input := myui.TextInput(c, &s.address).
+				Placeholder("2001:db8::1").
+				Label("IPv6 address").
+				Grow(1).
+				MinWidth(160)
+			input.OnSubmit(s.inspect)
 			myui.PrimaryButton(c, "Inspect").OnClick(s.inspect)
 		})
 		if s.addressErr != "" {
-			myui.Text(c, s.addressErr).TextColor(t.Danger).Selectable()
+			alert(c, s.addressErr, t.Danger)
 		}
 		if s.info != nil {
-			myui.Column(c).Gap(6).Padding(16).Background(t.Surface).Border(1, t.Border).Radius(8).Children(func() {
-				resultRow(c, "Compressed", s.info.Compressed)
-				resultRow(c, "Expanded", s.info.Expanded)
-				resultRow(c, "Type", s.info.Kind.String())
+			myui.Divider(c)
+			myui.Column(c).Gap(spaceS).Children(func() {
+				infoItem(c, "Compressed", s.info.Compressed)
+				infoItem(c, "Expanded", s.info.Expanded)
+				infoItem(c, "Type", s.info.Kind.String())
 			})
 		}
 	})
+	address.Grow(1).MinWidth(330)
 }
 
 func (a *App) ipv6Split(c *myui.Context) {
 	s := &a.ipv6
 	t := c.Theme()
-	myui.Column(c).Grow(1).Gap(8).Children(func() {
-		myui.Text(c, "Split a prefix").FontSize(16).Bold()
-		myui.Row(c).Gap(8).AlignItems(myui.Center).Children(func() {
-			myui.TextInput(c, &s.parent).Placeholder("2001:db8::/48").Label("IPv6 prefix").Width(320)
-			myui.TextInput(c, &s.childBits).Placeholder("64").Label("New prefix length").Width(120)
-			myui.PrimaryButton(c, "Split").OnClick(func() {
-				s.loadPage(0)
-			})
+	split := card(c, func() {
+		cardHeader(c, "Split a prefix", "Page through child prefixes without listing them all.", nil)
+		myui.Row(c).Children(func() {
+			parent := myui.TextInput(c, &s.parent).
+				Placeholder("2001:db8::/48").
+				Label("IPv6 prefix").
+				Grow(1).
+				MinWidth(160)
+			parent.OnSubmit(func() { s.loadPage(0) })
+		})
+		myui.Row(c).Gap(spaceS).AlignItems(myui.Center).Children(func() {
+			bits := myui.TextInput(c, &s.childBits).
+				Placeholder("64").
+				Label("New prefix length").
+				Width(120)
+			bits.OnSubmit(func() { s.loadPage(0) })
+			myui.PrimaryButton(c, "Split").OnClick(func() { s.loadPage(0) })
+			myui.Text(c, "new prefix bits").FontSize(11.5).TextColor(t.TextMuted)
 		})
 		if s.splitErr != "" {
-			myui.Text(c, s.splitErr).TextColor(t.Danger).Selectable()
-		}
-		if s.split != nil {
-			a.ipv6Page(c)
+			alert(c, s.splitErr, t.Danger)
 		}
 	})
+	split.Grow(1).MinWidth(330)
 }
 
 func (a *App) ipv6Page(c *myui.Context) {
 	s := &a.ipv6
-	t := c.Theme()
-	myui.Column(c).Grow(1).Gap(8).Children(func() {
-		myui.Text(c, fmt.Sprintf(
+	card(c, func() {
+		cardHeader(c, fmt.Sprintf(
 			"%d /%d subnets in %s",
 			s.page.Total, s.split.ChildBits(), s.split.Parent(),
-		)).TextColor(t.TextMuted)
-
-		myui.Row(c).Gap(8).AlignItems(myui.Center).Children(func() {
+		), fmt.Sprintf(
+			"Page %d of %d - subnets %d-%d of %d",
+			s.page.Offset/ipv6PageSize+1,
+			(s.page.Total+ipv6PageSize-1)/ipv6PageSize,
+			s.page.Offset+1,
+			s.page.End(),
+			s.page.Total,
+		), func() {
 			previous := myui.Button(c, "Previous").OnClick(s.previousPage)
 			previous.Disabled(!s.page.HasPrev())
-			myui.Text(c, fmt.Sprintf(
-				"Page %d of %d - subnets %d-%d of %d",
-				s.page.Offset/ipv6PageSize+1,
-				(s.page.Total+ipv6PageSize-1)/ipv6PageSize,
-				s.page.Offset+1,
-				s.page.End(),
-				s.page.Total,
-			))
 			next := myui.Button(c, "Next").OnClick(s.nextPage)
 			next.Disabled(!s.page.HasNext())
 		})
 
-		myui.Scroll(c).Grow(1).Key(s.page.Offset).Children(func() {
-			myui.Grid(c).Columns(4).Gap(6).Children(func() {
+		myui.Scroll(c).Height(220).Key(s.page.Offset).Children(func() {
+			myui.Grid(c).Columns(columnsFor(c, 160, 4)).Gap(spaceS).Children(func() {
 				for _, prefix := range s.page.Prefixes {
-					myui.Text(c, prefix.String()).SingleLine().Selectable()
+					tile(c, nil, func() {
+						myui.Text(c, prefix.String()).FontSize(11.5).SingleLine().Selectable()
+					})
 				}
 			})
 		})

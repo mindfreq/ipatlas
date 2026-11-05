@@ -28,6 +28,10 @@ type ipamState struct {
 	editLabel string
 	editOwner string
 	editErr   string
+
+	renaming   bool
+	renameName string
+	renameErr  string
 }
 
 func (s *ipamState) attach(store *ipam.Store) {
@@ -98,6 +102,7 @@ func (s *ipamState) selectNetwork(id int64) {
 	s.network = id
 	s.offset = 0
 	s.clearEdit()
+	s.cancelRename()
 	s.loadPage()
 }
 
@@ -204,6 +209,38 @@ func (s *ipamState) unassign() {
 	s.loadPage()
 }
 
+func (s *ipamState) beginRename() {
+	n := s.current()
+	if n == nil {
+		return
+	}
+	s.renaming = true
+	s.renameName = n.Name
+	s.renameErr = ""
+}
+
+func (s *ipamState) cancelRename() {
+	s.renaming = false
+	s.renameName = ""
+	s.renameErr = ""
+}
+
+func (s *ipamState) rename() {
+	if s.store == nil {
+		s.renameErr = "The IPAM database is unavailable."
+		return
+	}
+	if s.current() == nil {
+		return
+	}
+	if _, err := s.store.RenameNetwork(s.network, s.renameName); err != nil {
+		s.renameErr = "Could not rename the network: " + err.Error()
+		return
+	}
+	s.cancelRename()
+	s.refresh()
+}
+
 func (s *ipamState) deleteNetwork() {
 	if s.store == nil {
 		s.err = "The IPAM database is unavailable."
@@ -219,6 +256,7 @@ func (s *ipamState) deleteNetwork() {
 	s.network = 0
 	s.offset = 0
 	s.clearEdit()
+	s.cancelRename()
 	s.refresh()
 }
 
@@ -239,23 +277,22 @@ func (s *ipamState) saveNetwork(cidr, name string) (ipam.Network, error) {
 func (a *App) ipamView(c *myui.Context) {
 	s := &a.ipam
 	t := c.Theme()
-	myui.Column(c).Fill().Gap(12).Children(func() {
-		myui.Text(c, "IP address management").FontSize(20).Bold()
-		myui.Text(c, "Saved networks and their labelled addresses, stored locally.").TextColor(t.TextMuted)
-
+	myui.Column(c).Grow(1).Gap(spaceL).Children(func() {
 		if s.storeErr != "" {
-			myui.Text(c, s.storeErr).TextColor(t.Danger).Selectable()
+			alert(c, s.storeErr, t.Danger)
 			return
 		}
 		if s.err != "" {
-			myui.Text(c, s.err).TextColor(t.Danger).Selectable()
+			alert(c, s.err, t.Danger)
 		}
 
 		a.ipamNetworks(c)
 		if n := s.current(); n != nil {
 			a.ipamNetwork(c, n)
 		} else if len(s.networks) == 0 {
-			myui.Text(c, "No networks saved yet. Calculate an IPv4 block and save it.").TextColor(t.TextMuted)
+			emptyState(c, "No networks saved yet",
+				"Calculate an IPv4 block and save it to start the inventory.",
+				"Use the IPv4 calculator's Save to IPAM action.")
 		}
 	})
 }
@@ -263,20 +300,29 @@ func (a *App) ipamView(c *myui.Context) {
 func (a *App) ipamNetworks(c *myui.Context) {
 	s := &a.ipam
 	t := c.Theme()
-	myui.Column(c).Gap(6).Children(func() {
-		myui.Text(c, "Saved networks").FontSize(16).Bold()
+	card(c, func() {
+		cardHeader(c, "Saved networks",
+			"Choose a network to browse and label its usable addresses.", func() {
+				pill(c, fmt.Sprintf("%d saved", len(s.networks)), t.Accent)
+			})
 		if len(s.networks) == 0 {
+			myui.Text(c, "No networks saved yet. Calculate an IPv4 block and save it.").
+				FontSize(12).TextColor(t.TextMuted)
 			return
 		}
-		myui.Grid(c).Columns(3).Gap(6).Children(func() {
+		myui.Row(c).Wrap().Gap(spaceS).Children(func() {
 			for _, n := range s.networks {
 				n := n
-				button := myui.Button(c, n.Name)
-				if n.ID == s.network {
-					button = myui.PrimaryButton(c, n.Name)
-				}
-				button.OnClick(func() { s.selectNetwork(n.ID) })
-				myui.Text(c, n.CIDR).FontSize(11).TextColor(t.TextMuted)
+				myui.Column(c).Key(n.ID).Gap(2).Children(func() {
+					var button myui.Element
+					if n.ID == s.network {
+						button = myui.PrimaryButton(c, n.Name)
+					} else {
+						button = myui.Button(c, n.Name)
+					}
+					button.OnClick(func() { s.selectNetwork(n.ID) })
+					myui.Text(c, n.CIDR).FontSize(10.5).TextColor(t.TextMuted)
+				})
 			}
 		})
 	})
@@ -285,14 +331,31 @@ func (a *App) ipamNetworks(c *myui.Context) {
 func (a *App) ipamNetwork(c *myui.Context, n *ipam.Network) {
 	s := &a.ipam
 	t := c.Theme()
-	myui.Column(c).Grow(1).Gap(10).Children(func() {
-		myui.Row(c).Gap(12).AlignItems(myui.Center).Children(func() {
-			myui.Text(c, n.Name).FontSize(18).Bold()
-			myui.Text(c, n.CIDR).TextColor(t.TextMuted)
-			myui.Text(c, fmt.Sprintf("%d used, %d free of %d", s.stats.Used, s.stats.Free, s.stats.Total)).
-				TextColor(t.TextMuted)
-			myui.Button(c, "Delete network").OnClick(s.deleteNetwork)
+	myui.Column(c).Grow(1).Gap(spaceL).Children(func() {
+		cardHeader(c, n.Name, fmt.Sprintf("%s  ·  %d used, %d free of %d",
+			n.CIDR, s.stats.Used, s.stats.Free, s.stats.Total), func() {
+			pill(c, fmt.Sprintf("%d used", s.stats.Used), t.Accent)
+			pill(c, fmt.Sprintf("%d free", s.stats.Free), t.Success)
+			myui.Button(c, "Rename network").OnClick(s.beginRename)
+			myui.Button(c, "Delete network").TextColor(t.Danger).OnClick(s.deleteNetwork)
 		})
+
+		if s.renaming {
+			inset(c, func() {
+				myui.Row(c).Gap(spaceS).AlignItems(myui.Center).Wrap().Children(func() {
+					input := myui.TextInput(c, &s.renameName).
+						Label("Network name").
+						Placeholder("Office").
+						Width(230)
+					input.OnSubmit(s.rename)
+					myui.PrimaryButton(c, "Save name").OnClick(s.rename)
+					myui.Button(c, "Cancel").OnClick(s.cancelRename)
+				})
+				if s.renameErr != "" {
+					alert(c, s.renameErr, t.Danger)
+				}
+			})
+		}
 
 		a.ipamEditor(c)
 		a.ipamPaging(c)
@@ -300,56 +363,36 @@ func (a *App) ipamNetwork(c *myui.Context, n *ipam.Network) {
 	})
 }
 
-func (a *App) ipamGrid(c *myui.Context) {
-	s := &a.ipam
-	t := c.Theme()
-	myui.Scroll(c).Grow(1).Key(s.network).Children(func() {
-		myui.Grid(c).Columns(4).Gap(4).Children(func() {
-			for _, entry := range s.entries {
-				entry := entry
-				myui.Column(c).Key(entry.Addr.String()).Gap(2).Children(func() {
-					button := myui.Button(c, entry.Addr.String())
-					if entry.State == ipam.Used {
-						button.TextColor(t.Accent)
-					} else {
-						button.TextColor(t.TextMuted)
-					}
-					button.OnClick(func() { s.beginEdit(entry) })
-					if entry.State == ipam.Used {
-						label := entry.Label
-						if label == "" {
-							label = entry.Owner
-						}
-						if label == "" {
-							label = "assigned"
-						}
-						myui.Text(c, label).FontSize(11).SingleLine().TextColor(t.TextMuted)
-					} else {
-						myui.Text(c, "free").FontSize(11).TextColor(t.TextMuted)
-					}
-				})
-			}
-		})
-	})
-}
-
 func (a *App) ipamEditor(c *myui.Context) {
 	s := &a.ipam
 	t := c.Theme()
-	myui.Column(c).Gap(8).Padding(12).Background(t.Surface).Border(1, t.Border).Radius(8).Children(func() {
+	inset(c, func() {
 		if !s.editAddr.IsValid() {
-			myui.Text(c, "Select an address to label it or mark it used.").TextColor(t.TextMuted)
+			myui.Row(c).Gap(spaceS).AlignItems(myui.Center).Children(func() {
+				dot(c, t.TextMuted)
+				myui.Text(c, "Select an address to label it or mark it used.").
+					FontSize(12).TextColor(t.TextMuted)
+			})
 			return
 		}
-		myui.Text(c, "Edit "+s.editAddr.String()).Bold()
-		myui.Row(c).Key(s.editAddr.String()).Gap(8).AlignItems(myui.Center).Children(func() {
-			myui.TextInput(c, &s.editLabel).Label("Label").Placeholder("Printer, gateway...").Width(200)
-			myui.TextInput(c, &s.editOwner).Label("Owner").Placeholder("Team or person").Width(180)
+		myui.Row(c).Gap(spaceS).AlignItems(myui.Center).Wrap().Children(func() {
+			myui.Text(c, "Edit "+s.editAddr.String()).FontSize(13).FontWeight(650)
+			pill(c, "assignment", t.Accent)
+		})
+		myui.Row(c).Key(s.editAddr.String()).Gap(spaceS).AlignItems(myui.Center).Wrap().Children(func() {
+			myui.TextInput(c, &s.editLabel).
+				Label("Label").
+				Placeholder("Printer, gateway...").
+				Width(210)
+			myui.TextInput(c, &s.editOwner).
+				Label("Owner").
+				Placeholder("Team or person").
+				Width(190)
 			myui.PrimaryButton(c, "Save assignment").OnClick(s.assign)
 			myui.Button(c, "Remove assignment").OnClick(s.unassign)
 		})
 		if s.editErr != "" {
-			myui.Text(c, s.editErr).TextColor(t.Danger).Selectable()
+			alert(c, s.editErr, t.Danger)
 		}
 	})
 }
@@ -357,7 +400,7 @@ func (a *App) ipamEditor(c *myui.Context) {
 func (a *App) ipamPaging(c *myui.Context) {
 	s := &a.ipam
 	t := c.Theme()
-	myui.Row(c).Gap(8).AlignItems(myui.Center).Children(func() {
+	myui.Row(c).Gap(spaceS).AlignItems(myui.Center).Wrap().Children(func() {
 		previous := myui.Button(c, "Previous").OnClick(s.previousPage)
 		previous.Disabled(s.offset == 0)
 		myui.Text(c, fmt.Sprintf(
@@ -367,10 +410,55 @@ func (a *App) ipamPaging(c *myui.Context) {
 			s.offset+1,
 			s.offset+uint64(len(s.entries)),
 			s.stats.Total,
-		)).TextColor(t.TextMuted)
+		)).FontSize(12).TextColor(t.TextMuted)
 		next := myui.Button(c, "Next").OnClick(s.nextPage)
 		next.Disabled(s.offset+ipamPageSize >= s.stats.Total)
 	})
+}
+
+func (a *App) ipamGrid(c *myui.Context) {
+	s := &a.ipam
+	t := c.Theme()
+	myui.Scroll(c).Grow(1).Key(s.network).Children(func() {
+		myui.Grid(c).Columns(columnsFor(c, gridCellWidth, 5)).Gap(spaceS).Children(func() {
+			for _, entry := range s.entries {
+				entry := entry
+				color := t.Text
+				dotColor := t.Border
+				if entry.State == ipam.Used {
+					color = t.Accent
+					dotColor = t.Accent
+				}
+				cell := tile(c, nil, func() {
+					myui.Row(c).Gap(6).AlignItems(myui.Center).Children(func() {
+						dot(c, dotColor)
+						myui.Text(c, entry.Addr.String()).FontSize(11.5).TextColor(color)
+					})
+					myui.Text(c, addressLabel(entry)).FontSize(10).SingleLine().
+						TextColor(t.TextMuted)
+				})
+				if entry.State == ipam.Used {
+					cell.Background(t.Accent.Alpha(0.08)).
+						BorderColor(t.Accent.Alpha(0.28))
+				}
+				cell.OnClick(func() { s.beginEdit(entry) })
+			}
+		})
+	})
+}
+
+func addressLabel(entry ipam.AddressEntry) string {
+	if entry.State != ipam.Used {
+		return "free"
+	}
+	switch {
+	case entry.Label != "":
+		return entry.Label
+	case entry.Owner != "":
+		return entry.Owner
+	default:
+		return "assigned"
+	}
 }
 
 func pageCount(total uint64) uint64 {

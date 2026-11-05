@@ -94,6 +94,40 @@ func TestSaveNetwork(t *testing.T) {
 	}
 }
 
+func TestRenameNetwork(t *testing.T) {
+	s, _ := openTest(t)
+
+	n := mustSave(t, s, "192.168.1.0/24", "Office")
+
+	renamed, err := s.RenameNetwork(n.ID, " Branch ")
+	if err != nil {
+		t.Fatalf("RenameNetwork: %v", err)
+	}
+	if renamed.Name != "Branch" {
+		t.Errorf("name = %q, want Branch", renamed.Name)
+	}
+
+	defaulted, err := s.RenameNetwork(n.ID, "  ")
+	if err != nil {
+		t.Fatalf("RenameNetwork with empty name: %v", err)
+	}
+	if defaulted.Name != n.CIDR {
+		t.Errorf("name = %q, want the CIDR %q", defaulted.Name, n.CIDR)
+	}
+
+	networks, err := s.Networks()
+	if err != nil {
+		t.Fatalf("Networks: %v", err)
+	}
+	if len(networks) != 1 || networks[0].Name != n.CIDR {
+		t.Errorf("networks = %+v, want one network named by CIDR", networks)
+	}
+
+	if _, err := s.RenameNetwork(-1, "X"); !errors.Is(err, ErrNetworkNotFound) {
+		t.Errorf("RenameNetwork(-1) error = %v, want ErrNetworkNotFound", err)
+	}
+}
+
 func TestSaveNetworkDefaultsNameAndOrders(t *testing.T) {
 	s, _ := openTest(t)
 

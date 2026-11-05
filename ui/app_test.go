@@ -33,6 +33,40 @@ func TestShellTabs(t *testing.T) {
 	}
 }
 
+// The navigation rail stays clickable at the window's minimum size.
+func TestShellMinimumSize(t *testing.T) {
+	a := New()
+	tt := myui.NewTester(a.View, 820, 560)
+
+	for i, label := range tabLabels {
+		if err := tt.Click(label); err != nil {
+			t.Fatalf("click %q at 820x560: %v", label, err)
+		}
+		if a.tab != i {
+			t.Errorf("tab after click %q = %d, want %d", label, a.tab, i)
+		}
+		if !tt.HasText(sections[i].title) {
+			t.Errorf("texts after click %q = %q, want %q", label, tt.Texts(), sections[i].title)
+		}
+	}
+}
+
+// The shell and every section build in the dark theme.
+func TestShellDarkTheme(t *testing.T) {
+	a := New()
+	tt := myui.NewTester(a.View, 1100, 720)
+	tt.SetDark(true)
+
+	for i, label := range tabLabels {
+		if err := tt.Click(label); err != nil {
+			t.Fatalf("click %q in dark theme: %v", label, err)
+		}
+		if a.tab != i {
+			t.Errorf("tab after click %q = %d, want %d", label, a.tab, i)
+		}
+	}
+}
+
 func TestIPv4Calculator(t *testing.T) {
 	a := New()
 	tt := myui.NewTester(a.View, 1100, 720)

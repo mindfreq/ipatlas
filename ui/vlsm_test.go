@@ -66,47 +66,47 @@ func TestVLSMAllocateBlankName(t *testing.T) {
 func TestVLSMAllocateErrors(t *testing.T) {
 	tests := []struct {
 		name string
-		s    vlsmState
+		s    *vlsmState
 		want string
 	}{
 		{
 			name: "empty parent",
-			s:    vlsmState{rows: []*vlsmRow{{id: 1, name: "A", hosts: "10"}}},
+			s:    &vlsmState{rows: []*vlsmRow{{id: 1, name: "A", hosts: "10"}}},
 			want: "Enter a parent network",
 		},
 		{
 			name: "no departments",
-			s:    vlsmState{parent: "10.0.0.0/24"},
+			s:    &vlsmState{parent: "10.0.0.0/24"},
 			want: "Add at least one department",
 		},
 		{
 			name: "missing hosts",
-			s:    vlsmState{parent: "10.0.0.0/24", rows: []*vlsmRow{{id: 1, name: "A"}}},
+			s:    &vlsmState{parent: "10.0.0.0/24", rows: []*vlsmRow{{id: 1, name: "A"}}},
 			want: "Enter a host count",
 		},
 		{
 			name: "non numeric hosts",
-			s:    vlsmState{parent: "10.0.0.0/24", rows: []*vlsmRow{{id: 1, name: "A", hosts: "many"}}},
+			s:    &vlsmState{parent: "10.0.0.0/24", rows: []*vlsmRow{{id: 1, name: "A", hosts: "many"}}},
 			want: "whole number",
 		},
 		{
 			name: "zero hosts",
-			s:    vlsmState{parent: "10.0.0.0/24", rows: []*vlsmRow{{id: 1, name: "A", hosts: "0"}}},
+			s:    &vlsmState{parent: "10.0.0.0/24", rows: []*vlsmRow{{id: 1, name: "A", hosts: "0"}}},
 			want: "at least 1",
 		},
 		{
 			name: "too small",
-			s:    vlsmState{parent: "10.0.0.0/28", rows: []*vlsmRow{{id: 1, name: "A", hosts: "10"}, {id: 2, name: "B", hosts: "10"}}},
+			s:    &vlsmState{parent: "10.0.0.0/28", rows: []*vlsmRow{{id: 1, name: "A", hosts: "10"}, {id: 2, name: "B", hosts: "10"}}},
 			want: "Not enough space",
 		},
 		{
 			name: "ipv6 parent",
-			s:    vlsmState{parent: "2001:db8::/32", rows: []*vlsmRow{{id: 1, name: "A", hosts: "10"}}},
+			s:    &vlsmState{parent: "2001:db8::/32", rows: []*vlsmRow{{id: 1, name: "A", hosts: "10"}}},
 			want: "must be an IPv4 CIDR",
 		},
 		{
 			name: "invalid parent",
-			s:    vlsmState{parent: "nope", rows: []*vlsmRow{{id: 1, name: "A", hosts: "10"}}},
+			s:    &vlsmState{parent: "nope", rows: []*vlsmRow{{id: 1, name: "A", hosts: "10"}}},
 			want: "not a valid CIDR",
 		},
 	}
@@ -189,6 +189,68 @@ func TestVLSMPlanner(t *testing.T) {
 	}
 	if !tt.HasText("208 of 256 addresses allocated") {
 		t.Errorf("texts %q do not show the allocation summary", tt.Texts())
+	}
+}
+
+// The allocation card sits below the fold at the minimum window size, so the
+// page must scroll and still build the result.
+func TestVLSMResultAtMinimumSize(t *testing.T) {
+	a := New()
+	tt := myui.NewTester(a.View, 820, 560)
+
+	if err := tt.Click("VLSM"); err != nil {
+		t.Fatal(err)
+	}
+	fill := func(label, value string) {
+		t.Helper()
+		if err := tt.Click(label); err != nil {
+			t.Fatalf("click %q: %v", label, err)
+		}
+		tt.Type(value)
+	}
+	fill("Parent network", "192.168.1.0/24")
+	fill("Department 1", "Programming")
+	fill("Hosts 1", "100")
+	if err := tt.Click("Allocate"); err != nil {
+		t.Fatal(err)
+	}
+	if a.vlsm.plan == nil {
+		t.Fatalf("plan = nil, error = %q", a.vlsm.err)
+	}
+	if !tt.HasText("128 of 256 addresses allocated") {
+		t.Errorf("texts %q do not show the allocation summary", tt.Texts())
+	}
+	if !tt.HasText("192.168.1.0/25") {
+		t.Errorf("texts %q do not show the allocated subnet", tt.Texts())
+	}
+}
+
+func TestVLSMCSV(t *testing.T) {
+	s := vlsmState{
+		parent: "192.168.1.0/24",
+		rows: []*vlsmRow{
+			{id: 1, name: "Programming", hosts: "100"},
+			{id: 2, name: "Management", hosts: "50"},
+		},
+	}
+	s.allocate()
+	if s.plan == nil {
+		t.Fatalf("plan = nil, error = %q", s.err)
+	}
+
+	got := string(vlsmCSV(s.plan))
+	if !strings.HasPrefix(got, "\xef\xbb\xbf") {
+		t.Error("CSV is missing the UTF-8 BOM Excel expects")
+	}
+	want := []string{
+		"Department,CIDR,Mask,Usable range,Gateway,Broadcast,Usable hosts",
+		"Programming,192.168.1.0/25,255.255.255.128,192.168.1.1 - 192.168.1.126,192.168.1.1,192.168.1.127,126",
+		"Management,192.168.1.128/26,255.255.255.192,192.168.1.129 - 192.168.1.190,192.168.1.129,192.168.1.191,62",
+	}
+	for _, row := range want {
+		if !strings.Contains(got, row) {
+			t.Errorf("CSV = %q, want it to contain %q", got, row)
+		}
 	}
 }
 

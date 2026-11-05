@@ -176,6 +176,59 @@ func TestIPAMEditAndReload(t *testing.T) {
 	}
 }
 
+func TestIPAMRenameNetwork(t *testing.T) {
+	store, _ := openIPAM(t)
+	if _, err := store.SaveNetwork("192.168.1.0/24", "Office"); err != nil {
+		t.Fatalf("SaveNetwork: %v", err)
+	}
+	a := NewWithStore(store)
+	tt := myui.NewTester(a.View, 1100, 720)
+
+	if err := tt.Click("IPAM"); err != nil {
+		t.Fatal(err)
+	}
+	if !tt.HasText("Office") {
+		t.Fatalf("texts %q do not show the saved network", tt.Texts())
+	}
+
+	if err := tt.Click("Rename network"); err != nil {
+		t.Fatal(err)
+	}
+	if !a.ipam.renaming {
+		t.Fatal("rename editor did not open")
+	}
+	if a.ipam.renameName != "Office" {
+		t.Fatalf("rename name = %q, want the prefilled Office", a.ipam.renameName)
+	}
+
+	// The field is prefilled; start the edit from an empty value.
+	a.ipam.renameName = ""
+	if err := tt.Click("Network name"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("Branch")
+	if err := tt.Click("Save name"); err != nil {
+		t.Fatal(err)
+	}
+
+	if a.ipam.renaming {
+		t.Error("rename editor still open after saving")
+	}
+	if a.ipam.renameErr != "" {
+		t.Fatalf("rename error = %q", a.ipam.renameErr)
+	}
+	networks, err := store.Networks()
+	if err != nil {
+		t.Fatalf("Networks: %v", err)
+	}
+	if len(networks) != 1 || networks[0].Name != "Branch" {
+		t.Fatalf("networks = %+v, want one named Branch", networks)
+	}
+	if !hasExactText(tt, "Branch") {
+		t.Errorf("texts %q do not show the new name", tt.Texts())
+	}
+}
+
 func TestIPAMSelectAndDelete(t *testing.T) {
 	store, _ := openIPAM(t)
 	if _, err := store.SaveNetwork("10.0.0.0/24", "First"); err != nil {

@@ -46,47 +46,70 @@ func (s *ipv4State) calculate() {
 func (a *App) ipv4View(c *myui.Context) {
 	s := &a.ipv4
 	t := c.Theme()
-	myui.Column(c).Fill().Gap(14).Children(func() {
-		myui.Text(c, "IPv4 calculator").FontSize(20).Bold()
-		myui.Text(c, "Enter an IPv4 CIDR block to calculate its address plan.").TextColor(t.TextMuted)
-		myui.Row(c).Gap(8).AlignItems(myui.Center).Children(func() {
-			myui.TextInput(c, &s.input).Placeholder("192.168.1.0/24").Label("CIDR").Width(280)
-			myui.PrimaryButton(c, "Calculate").OnClick(s.calculate)
+	myui.Scroll(c).Grow(1).Children(func() {
+		myui.Column(c).Gap(spaceL).Children(func() {
+			card(c, func() {
+				cardHeader(c, "Calculate a block",
+					"Any IPv4 CIDR from /0 to /32; host bits are normalized.", nil)
+				myui.Row(c).Gap(spaceS).AlignItems(myui.Center).Wrap().Children(func() {
+					input := myui.TextInput(c, &s.input).
+						Placeholder("192.168.1.0/24").
+						Label("CIDR").
+						Width(300)
+					input.OnSubmit(s.calculate)
+					myui.PrimaryButton(c, "Calculate").OnClick(s.calculate)
+				})
+				if s.err != "" {
+					alert(c, s.err, t.Danger)
+				}
+			})
+			if s.result != nil {
+				a.ipv4Result(c, s.result)
+			}
 		})
-		if s.err != "" {
-			myui.Text(c, s.err).TextColor(t.Danger).Selectable()
-		}
-		if s.result != nil {
-			a.ipv4Result(c, s.result)
-		}
 	})
 }
 
 func (a *App) ipv4Result(c *myui.Context, r *netcalc.IPv4Subnet) {
 	s := &a.ipv4
 	t := c.Theme()
-	myui.Column(c).Gap(6).Padding(16).Background(t.Surface).Border(1, t.Border).Radius(8).Children(func() {
-		myui.Text(c, cidrString(*r)).FontSize(18).Bold().Selectable()
-		if r.Address != r.Network {
-			resultRow(c, "Entered address", r.Address.String())
-		}
-		resultRow(c, "Broadcast", r.Broadcast.String())
-		resultRow(c, "Netmask", r.Mask.String())
-		resultRow(c, "Wildcard", r.Wildcard.String())
-		resultRow(c, "Usable range", r.First.String()+" - "+r.Last.String())
-		resultRow(c, "Usable hosts", strconv.FormatUint(r.Usable, 10))
-		resultRow(c, "Gateway", r.Gateway.String())
+	card(c, func() {
+		cardHeader(c, cidrString(*r), "Address plan", func() {
+			pill(c, "IPv4", t.Accent)
+		})
+
 		myui.Divider(c)
-		myui.Row(c).Gap(8).AlignItems(myui.Center).Children(func() {
-			myui.TextInput(c, &s.saveName).Label("Network name").Placeholder("Office").Width(220)
+
+		myui.Grid(c).Columns(2).Gap(spaceM).Children(func() {
+			infoItem(c, "Network", r.Network.String())
+			infoItem(c, "Broadcast", r.Broadcast.String())
+			infoItem(c, "Netmask", r.Mask.String())
+			infoItem(c, "Wildcard", r.Wildcard.String())
+			infoItem(c, "Usable range", r.First.String()+" - "+r.Last.String())
+			infoItem(c, "Usable hosts", strconv.FormatUint(r.Usable, 10))
+			infoItem(c, "Gateway", r.Gateway.String())
+			if r.Address != r.Network {
+				infoItem(c, "Entered address", r.Address.String())
+			}
+			infoItem(c, "Prefix", "/"+strconv.Itoa(r.Prefix))
+		})
+
+		myui.Divider(c)
+		sectionLabel(c, "ADD TO INVENTORY")
+		myui.Row(c).Gap(spaceS).AlignItems(myui.Center).Wrap().Children(func() {
+			myui.TextInput(c, &s.saveName).
+				Label("Network name").
+				Placeholder("Office").
+				Width(230)
 			myui.PrimaryButton(c, "Save to IPAM").OnClick(a.saveCurrentIPv4)
+			myui.Text(c, "Stored in the local IPAM database.").FontSize(11.5).TextColor(t.TextMuted)
 		})
 		if s.saveMsg != "" {
 			color := t.Success
 			if s.saveErr {
 				color = t.Danger
 			}
-			myui.Text(c, s.saveMsg).TextColor(color).Selectable()
+			alert(c, s.saveMsg, color)
 		}
 	})
 }
@@ -108,14 +131,6 @@ func (a *App) saveCurrentIPv4() {
 	}
 	s.saveName = ""
 	s.saveMsg = "Saved " + saved.CIDR + " to IPAM."
-}
-
-func resultRow(c *myui.Context, label, value string) {
-	t := c.Theme()
-	myui.Row(c).Gap(12).Children(func() {
-		myui.Text(c, label).Width(140).TextColor(t.TextMuted)
-		myui.Text(c, value).Selectable()
-	})
 }
 
 func cidrString(s netcalc.IPv4Subnet) string {
