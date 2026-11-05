@@ -1,10 +1,10 @@
-# IPatlas
+# IPAtlas
 
-IPatlas is a native desktop subnet calculator and IP address manager. It
+IPAtlas is a native desktop subnet calculator and IP address manager. It
 combines IPv4 and IPv6 planning, VLSM allocation, a local IPAM database and a
 live TCP host scanner in one window. The interface is drawn by
-[MyGo](https://github.com/egoist/mygo) directly: there is no web view, HTML,
-JavaScript or cgo.
+[MyGo](https://github.com/egoist/mygo) directly: there is no web view, HTML or
+JavaScript.
 
 ## Features
 
@@ -44,7 +44,7 @@ go run .
 
 The window remembers its position and size under the `main` state key. The IPAM
 database lives in MyGo's per-user data directory (for example
-`~/.config/IPatlas/ipatlas.db` on Linux; `mygo.App.Path(mygo.PathUserData)` on
+`~/.config/IPAtlas/ipatlas.db` on Linux; `mygo.App.Path(mygo.PathUserData)` on
 other systems).
 
 ## Package
@@ -55,15 +55,9 @@ MyGo builds self-contained desktop artifacts without cgo:
 go tool mygo build -platform linux/amd64
 ```
 
-`build/` then contains the executable, a `.tar.gz` with an install script, a
-Debian package and a PKGBUILD. Other targets work the same way:
-
 ```sh
 go tool mygo build -platform linux/amd64,windows/amd64,darwin/universal
 ```
-
-`mygo.json` sets the display name, `com.ipatlas.app` identifier, version and
-output directory. `resources/icon.png` is the app and window icon.
 
 ## Test
 

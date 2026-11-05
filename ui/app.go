@@ -1,4 +1,4 @@
-// Package ui builds the IPatlas native interface. It calls the domain
+// Package ui builds the IPAtlas native interface. It calls the domain
 // packages for all IP math; MyGo types never leave this package.
 package ui
 
@@ -109,7 +109,7 @@ func (a *App) navRail(c *myui.Context, t *myui.Theme) {
 					})
 				})
 				myui.Column(c).Gap(0).Children(func() {
-					myui.Text(c, "IPatlas").FontSize(16).FontWeight(650)
+					myui.Text(c, "IPAtlas").FontSize(16).FontWeight(650)
 					myui.Text(c, "Subnet toolkit").FontSize(11).TextColor(t.TextMuted)
 				})
 			})

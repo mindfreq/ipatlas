@@ -16,9 +16,6 @@ import (
 var iconPNG []byte
 
 func main() {
-	mygo.App.SetName("IPatlas")
-	mygo.App.SetVersion("0.1.0")
-
 	a := appui.New()
 	mygo.App.WhenReady(func() {
 		var store *ipam.Store
@@ -32,7 +29,7 @@ func main() {
 		}
 
 		win := mygo.NewWindow(mygo.WindowOptions{
-			Title:     "IPatlas",
+			Title:     "IPAtlas",
 			Width:     1100,
 			Height:    720,
 			MinWidth:  820,

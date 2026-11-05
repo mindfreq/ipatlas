@@ -1,6 +1,11 @@
 {
-  "name": "IPatlas",
+  "name": "IPAtlas",
   "identifier": "com.ipatlas.app",
   "version": "0.1.0",
-  "out": "build"
+  "out": "build",
+  "linux": {
+    "categories": ["Network", "Utility"],
+    "comment": "IP address management and network calculator",
+    "webview": false
+  }
 }
