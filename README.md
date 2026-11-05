@@ -32,14 +32,7 @@ JavaScript.
 ## Build and run
 
 ```sh
-go build -o ipatlas .
-./ipatlas
-```
-
-Or run it directly:
-
-```sh
-go run .
+go tool mygo dev
 ```
 
 The window remembers its position and size under the `main` state key. The IPAM
