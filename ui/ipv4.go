@@ -60,7 +60,7 @@ func (a *App) ipv4View(c *myui.Context) {
 func (a *App) ipv4Result(c *myui.Context, r *netcalc.IPv4Subnet) {
 	t := c.Theme()
 	myui.Column(c).Gap(6).Padding(16).Background(t.Surface).Border(1, t.Border).Radius(8).Children(func() {
-		myui.Text(c, r.Network.String()+"/"+strconv.Itoa(r.Prefix)).FontSize(18).Bold().Selectable()
+		myui.Text(c, cidrString(*r)).FontSize(18).Bold().Selectable()
 		if r.Address != r.Network {
 			resultRow(c, "Entered address", r.Address.String())
 		}
@@ -79,4 +79,8 @@ func resultRow(c *myui.Context, label, value string) {
 		myui.Text(c, label).Width(140).TextColor(t.TextMuted)
 		myui.Text(c, value).Selectable()
 	})
+}
+
+func cidrString(s netcalc.IPv4Subnet) string {
+	return s.Network.String() + "/" + strconv.Itoa(s.Prefix)
 }

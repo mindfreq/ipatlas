@@ -41,11 +41,14 @@ var sections = []section{
 type App struct {
 	tab  int
 	ipv4 ipv4State
+	vlsm vlsmState
 }
 
 // New returns an application with the IPv4 tab selected.
 func New() *App {
-	return &App{}
+	a := &App{}
+	a.vlsm.addRow()
+	return a
 }
 
 // View builds the application shell and the selected section.
@@ -68,6 +71,10 @@ func (a *App) sectionView(c *myui.Context) {
 	}
 	if a.tab == 0 {
 		a.ipv4View(c)
+		return
+	}
+	if a.tab == 1 {
+		a.vlsmView(c)
 		return
 	}
 
