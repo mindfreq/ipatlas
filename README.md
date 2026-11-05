@@ -35,8 +35,7 @@ JavaScript. No data collection.
 go tool mygo dev
 ```
 
-The window remembers its position and size under the `main` state key. The IPAM
-database lives in MyGo's per-user data directory (for example
+The IPAM database lives in MyGo's per-user data directory (for example
 `~/.config/IPAtlas/ipatlas.db` on Linux; `mygo.App.Path(mygo.PathUserData)` on
 other systems).
 
@@ -78,7 +77,6 @@ requires root, a real network or ICMP permission.
 | `internal/ipam` | SQLite schema, migrations, networks and assignments |
 | `internal/scanner` | Bounded TCP scan, optional ICMP, ARP-table parsing |
 | `resources/` | App icon |
-| `ROADMAP.md`, `PROGRESS.md` | Task log and decisions |
 | `VERIFIED_APIS.md` | MyGo APIs used, with `go doc` evidence |
 
 ## Scanner notes
