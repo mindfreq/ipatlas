@@ -41,6 +41,7 @@ func main() {
 
 		if store != nil {
 			mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
+				a.StopScan()
 				if err := store.Close(); err != nil {
 					log.Printf("ipam: close: %v", err)
 				}

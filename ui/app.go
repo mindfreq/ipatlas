@@ -46,6 +46,7 @@ type App struct {
 	vlsm vlsmState
 	ipv6 ipv6State
 	ipam ipamState
+	scan scanState
 }
 
 // New returns an application without an IPAM database. The app attaches one
@@ -99,6 +100,10 @@ func (a *App) sectionView(c *myui.Context) {
 	}
 	if a.tab == 3 {
 		a.ipamView(c)
+		return
+	}
+	if a.tab == 4 {
+		a.scanView(c)
 		return
 	}
 
