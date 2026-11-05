@@ -265,7 +265,36 @@ func TestIPAMSelectAndDelete(t *testing.T) {
 		t.Errorf("texts %q do not show the first network's grid", tt.Texts())
 	}
 
+	// Deleting asks for confirmation first and does not remove anything yet.
 	if err := tt.Click("Delete network"); err != nil {
+		t.Fatal(err)
+	}
+	if !a.ipam.confirmDelete {
+		t.Fatal("delete confirmation dialog did not open")
+	}
+	if !tt.HasText("This cannot be undone") {
+		t.Errorf("texts %q do not show the confirmation warning", tt.Texts())
+	}
+	if _, err := store.Network(first.ID); err != nil {
+		t.Error("network was deleted before confirmation")
+	}
+
+	// Cancel keeps the network.
+	if err := tt.Click("Cancel"); err != nil {
+		t.Fatal(err)
+	}
+	if a.ipam.confirmDelete {
+		t.Error("dialog still open after cancel")
+	}
+	if _, err := store.Network(first.ID); err != nil {
+		t.Error("cancel deleted the network")
+	}
+
+	// Confirming the dialog deletes it and selects the remaining network.
+	if err := tt.Click("Delete network"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("Delete"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Network(first.ID); err == nil {
@@ -273,6 +302,9 @@ func TestIPAMSelectAndDelete(t *testing.T) {
 	}
 	if a.ipam.network != second.ID {
 		t.Errorf("selection after delete = %d, want %d", a.ipam.network, second.ID)
+	}
+	if a.ipam.confirmDelete {
+		t.Error("dialog still open after deleting")
 	}
 }
 

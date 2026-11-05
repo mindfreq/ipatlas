@@ -332,7 +332,7 @@ func (a *App) ipamDeleteDialog(c *myui.Context) {
 			}
 			myui.Row(c).Gap(spaceS).Justify(myui.End).Children(func() {
 				myui.Button(c, "Cancel").OnClick(s.cancelDelete)
-				myui.Button(c, "Delete network").TextColor(t.Danger).OnClick(s.deleteNetwork)
+				myui.Button(c, "Delete").TextColor(t.Danger).OnClick(s.deleteNetwork)
 			})
 		})
 	})
