@@ -3,8 +3,8 @@
 IPAtlas is a native desktop subnet calculator and IP address manager. It
 combines IPv4 and IPv6 planning, VLSM allocation, a local IPAM database and a
 live TCP host scanner in one window. The interface is drawn by
-[MyGo](https://github.com/egoist/mygo) directly: there is no web view, HTML or
-JavaScript.
+[MyGo](https://github.com/egoist/mygo) directly: there is no web view, HTML,
+JavaScript and No data collection.
 
 ## Features
 
