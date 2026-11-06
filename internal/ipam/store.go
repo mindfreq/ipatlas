@@ -568,6 +568,164 @@ func (s *Store) Stats(networkID int64) (Stats, error) {
 	return Stats{Total: n.Subnet.Usable, Used: used, Free: n.Subnet.Usable - used}, nil
 }
 
+// Offset returns addr's index among the usable addresses of a network. It
+// fails with ErrAddressNotInNetwork when addr is outside the usable range,
+// which includes the network and broadcast addresses.
+func (s *Store) Offset(networkID int64, addr netip.Addr) (uint64, error) {
+	if err := s.check(); err != nil {
+		return 0, err
+	}
+	n, err := s.Network(networkID)
+	if err != nil {
+		return 0, err
+	}
+	offset, ok := usableOffset(n.Subnet, addr)
+	if !ok {
+		return 0, fmt.Errorf("ipam: %s: %w", addr, ErrAddressNotInNetwork)
+	}
+	return offset, nil
+}
+
+// likeEscape is the escape character of the LIKE patterns SearchAssignments
+// builds.
+const likeEscape = `\`
+
+// likePattern turns text into a "contains" LIKE pattern in which %, _ and the
+// escape character itself have no special meaning.
+func likePattern(text string) string {
+	r := strings.NewReplacer(likeEscape, likeEscape+likeEscape, "%", likeEscape+"%", "_", likeEscape+"_")
+	return "%" + r.Replace(text) + "%"
+}
+
+// SearchAssignments returns the assignments of a network whose address, label
+// or owner contains query, ordered by address, and the total number of
+// matches. SQLite ignores case for ASCII letters only. offset and limit page
+// through the matches (offset counts matches, not addresses); limit is capped
+// at MaxAddressPage. An offset past the last match returns no entries and the
+// total. An empty query matches nothing.
+func (s *Store) SearchAssignments(networkID int64, query string, offset uint64, limit int) ([]AddressEntry, uint64, error) {
+	if err := s.check(); err != nil {
+		return nil, 0, err
+	}
+	if limit <= 0 {
+		return nil, 0, fmt.Errorf("ipam: %w: %d", ErrInvalidLimit, limit)
+	}
+	if limit > MaxAddressPage {
+		limit = MaxAddressPage
+	}
+	n, err := s.Network(networkID)
+	if err != nil {
+		return nil, 0, err
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, 0, nil
+	}
+
+	pattern := likePattern(query)
+	const where = `network_id = ? AND (
+		address LIKE ? ESCAPE '\' OR label LIKE ? ESCAPE '\' OR owner LIKE ? ESCAPE '\')`
+
+	var total uint64
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM assignments WHERE `+where,
+		networkID, pattern, pattern, pattern,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("ipam: count matches: %w", err)
+	}
+	if total == 0 || offset >= total {
+		return nil, total, nil
+	}
+
+	rows, err := s.db.Query(
+		`SELECT ip, label, owner FROM assignments WHERE `+where+` ORDER BY ip LIMIT ? OFFSET ?`,
+		networkID, pattern, pattern, pattern, limit, offset,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("ipam: search assignments: %w", err)
+	}
+	first := addrToUint32(n.Subnet.First)
+	entries := make([]AddressEntry, 0, limit)
+	for rows.Next() {
+		var (
+			ip    uint64
+			label string
+			owner string
+		)
+		if err := rows.Scan(&ip, &label, &owner); err != nil {
+			rows.Close()
+			return nil, 0, fmt.Errorf("ipam: read match: %w", err)
+		}
+		entries = append(entries, AddressEntry{
+			Addr:   addrFromUint32(first + uint32(ip)),
+			Offset: ip,
+			State:  Used,
+			Label:  label,
+			Owner:  owner,
+		})
+	}
+	if err := rows.Close(); err != nil {
+		return nil, 0, fmt.Errorf("ipam: search assignments: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("ipam: search assignments: %w", err)
+	}
+	return entries, total, nil
+}
+
+// NextFree returns the first address without an assignment at or after the
+// usable index from. It reports false, with no error, when there is none,
+// which includes a from past the last usable address.
+func (s *Store) NextFree(networkID int64, from uint64) (AddressEntry, bool, error) {
+	if err := s.check(); err != nil {
+		return AddressEntry{}, false, err
+	}
+	n, err := s.Network(networkID)
+	if err != nil {
+		return AddressEntry{}, false, err
+	}
+	if from >= n.Subnet.Usable {
+		return AddressEntry{}, false, nil
+	}
+
+	rows, err := s.db.Query(
+		`SELECT ip FROM assignments WHERE network_id = ? AND ip >= ? ORDER BY ip`,
+		networkID, from,
+	)
+	if err != nil {
+		return AddressEntry{}, false, fmt.Errorf("ipam: find free address: %w", err)
+	}
+	// The rows come in ascending order and are unique, so the first gap
+	// between them and from is the first free index.
+	candidate := from
+	for rows.Next() {
+		var ip uint64
+		if err := rows.Scan(&ip); err != nil {
+			rows.Close()
+			return AddressEntry{}, false, fmt.Errorf("ipam: find free address: %w", err)
+		}
+		if ip > candidate {
+			break
+		}
+		candidate = ip + 1
+	}
+	if err := rows.Close(); err != nil {
+		return AddressEntry{}, false, fmt.Errorf("ipam: find free address: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return AddressEntry{}, false, fmt.Errorf("ipam: find free address: %w", err)
+	}
+	if candidate >= n.Subnet.Usable {
+		return AddressEntry{}, false, nil
+	}
+
+	return AddressEntry{
+		Addr:   addrFromUint32(addrToUint32(n.Subnet.First) + uint32(candidate)),
+		Offset: candidate,
+		State:  Free,
+	}, true, nil
+}
+
 // usableOffset maps addr to its index among a subnet's usable addresses.
 func usableOffset(subnet netcalc.IPv4Subnet, addr netip.Addr) (uint64, bool) {
 	if !addr.Is4() || !subnet.First.IsValid() || !subnet.Last.IsValid() {

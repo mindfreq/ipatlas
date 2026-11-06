@@ -319,7 +319,7 @@ func TestIPAMPaging(t *testing.T) {
 	if err := tt.Click("IPAM"); err != nil {
 		t.Fatal(err)
 	}
-	if !tt.HasText("Page 1 of 2 - addresses 1-256 of 510") {
+	if !tt.HasText("Page 1 of 2 · 1-256 of 510") {
 		t.Fatalf("texts %q do not show page 1", tt.Texts())
 	}
 
@@ -329,11 +329,11 @@ func TestIPAMPaging(t *testing.T) {
 	if a.ipam.offset != ipamPageSize {
 		t.Errorf("offset after Next = %d, want %d", a.ipam.offset, ipamPageSize)
 	}
-	if !tt.HasText("Page 2 of 2 - addresses 257-510 of 510") {
+	if !tt.HasText("Page 2 of 2 · 257-510 of 510") {
 		t.Errorf("texts %q do not show page 2", tt.Texts())
 	}
 
-	if err := tt.Click("Previous"); err != nil {
+	if err := tt.Click("Prev"); err != nil {
 		t.Fatal(err)
 	}
 	if a.ipam.offset != 0 {
