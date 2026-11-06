@@ -5,7 +5,7 @@
   "out": "build",
   "linux": {
     "categories": ["Network", "Utility"],
-    "comment": "IP address management and network calculator",
+    "comment": "Subnet toolkit",
     "webview": false
   }
 }
