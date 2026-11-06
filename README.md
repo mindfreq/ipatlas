@@ -6,7 +6,6 @@ live TCP host scanner in one window. The interface is drawn by
 [MyGo](https://github.com/egoist/mygo) directly: there is no web view, HTML or
 JavaScript. No data collection.
 
-Screenshots
 
 <table>
 <tr>
