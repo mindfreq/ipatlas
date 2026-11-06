@@ -231,27 +231,30 @@ func (a *App) navRail(c *myui.Context, t *myui.Theme) {
 						a.navIconButton(c, i)
 					}
 				})
-				myui.Row(c).Fill().Center().Children(func() {
-					a.themeToggle(c)
+			} else {
+				myui.Sidebar(c, &a.nav, func() {
+					myui.SidebarSection(c, "Tools", nil, func() {
+						for i, label := range tabLabels {
+							myui.SidebarItem(c, label, navIcons[i], label)
+						}
+					})
+				}).Width(navWidth - railPad*2).Grow(1).OnChange(func() {
+					a.selectTab(a.nav)
 				})
-				return
 			}
 
-			myui.Sidebar(c, &a.nav, func() {
-				myui.SidebarSection(c, "Tools", nil, func() {
-					for i, label := range tabLabels {
-						myui.SidebarItem(c, label, navIcons[i], label)
-					}
-				})
-			}).Width(navWidth - railPad*2).Grow(1).OnChange(func() {
-				a.selectTab(a.nav)
-			})
-
-			myui.Row(c).Gap(spaceS).AlignItems(myui.Center).Padding(8, 4, 0, 4).Children(func() {
-				myui.Column(c).Gap(2).Grow(1).MinWidth(0).Children(func() {
-					myui.Text(c, "Native UI").FontSize(10.5).FontWeight(600).TextColor(t.TextMuted)
-					myui.Text(c, "Data stays on this device").FontSize(10.5).TextColor(t.TextMuted)
-				})
+			// Rail footer: the notes take the open sidebar's room and the
+			// theme toggle rides at their right, the same small distance
+			// from the rail's edge whether it is open or collapsed.
+			myui.Row(c).Gap(spaceM).AlignItems(myui.Center).Padding(8, 4, 0, 4).Children(func() {
+				if a.navCollapsed {
+					myui.Spacer(c)
+				} else {
+					myui.Column(c).Gap(2).Grow(1).MinWidth(0).Children(func() {
+						myui.Text(c, "Native UI").FontSize(10.5).FontWeight(600).TextColor(t.TextMuted)
+						myui.Text(c, "Data stays on this device").FontSize(10.5).TextColor(t.TextMuted)
+					})
+				}
 				a.themeToggle(c)
 			})
 		})
