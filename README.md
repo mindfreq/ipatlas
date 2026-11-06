@@ -6,6 +6,14 @@ live TCP host scanner in one window. The interface is drawn by
 [MyGo](https://github.com/egoist/mygo) directly: there is no web view, HTML or
 JavaScript. No data collection.
 
+<p align="center">
+<img src="screenshot/1.png" width="100%" alt="Screenshot 1">
+<img src="screenshot/2.png" width="100%" alt="Screenshot 2">
+<img src="screenshot/3.png" width="100%" alt="Screenshot 3">
+<img src="screenshot/4.png" width="100%" alt="Screenshot 4">
+</p>
+
+
 ## Features
 
 - **IPv4 calculator** — network, broadcast, netmask, wildcard, usable range,
