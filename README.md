@@ -109,7 +109,3 @@ requires root, a real network or ICMP permission.
 - MAC addresses are read only from the operating system's ARP table
   (`/proc/net/arp` on Linux). The scanner never sends raw ARP packets.
 - Only scan networks you are responsible for.
-
-## License
-
-See the repository for licensing information.
