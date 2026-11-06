@@ -1,3 +1,4 @@
+
 name: Release
 
 on:
@@ -7,8 +8,35 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  version:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: ver
+        run: |
+          VERSION=$(jq -r .version mygo.json)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+          - windows/amd64
+          - windows/arm64
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -18,35 +46,49 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install NSIS (Windows installer)
+      - name: Install NSIS
+        if: startsWith(matrix.platform, 'windows/')
         run: |
           sudo apt-get update
           sudo apt-get install -y nsis
 
-      - name: Read version from mygo.json
-        id: ver
-        run: |
-          VERSION=$(jq -r .version mygo.json)
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Build all targets with mygo
+      - name: Build
         run: |
           go run github.com/egoist/mygo/cmd/mygo build \
-            -platform linux/amd64,linux/arm64,windows/amd64,windows/arm64 \
+            -platform ${{ matrix.platform }} \
             -skip-build-command
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ strategy.job-index }}
+          path: build/
+          if-no-files-found: error
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: build
+          merge-multiple: true
 
       - name: List artifacts
         run: find build -type f | sort
 
-      - name: Create draft release and upload artifacts
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.ver.outputs.tag }}
-          name: IPAtlas ${{ steps.ver.outputs.version }}
-          draft: true
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: IPAtlas ${{ needs.version.outputs.version }}
+          draft: false
           generate_release_notes: true
           files: |
-            build/linux-*/*.deb
-            build/linux-*/*-linux-*.tar.gz
-            build/windows-*/*-setup-*.exe
+            build/**/*.deb
+            build/**/*.tar.gz
+            build/**/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
