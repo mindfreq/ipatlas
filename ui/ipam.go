@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"strings"
 
+	"github.com/egoist/mygo"
 	myui "github.com/egoist/mygo/ui"
 
 	"ipatlas/internal/ipam"
@@ -64,6 +65,124 @@ type ipamState struct {
 
 	// reveal asks the grid to scroll the selected address into view once.
 	reveal bool
+
+	// Async plumbing. Database work runs on a goroutine and reports back on
+	// the UI thread, so a slow database never blocks a frame. gen drops
+	// results of superseded jobs; busy disables the buttons that load.
+	gen        uint64
+	busy       bool
+	invalidate func() // the window's Invalidate; set on every frame
+}
+
+// runOffUI runs job on another goroutine and then fn on the UI thread. It is
+// a variable so tests can run the whole round-trip synchronously and keep
+// the state deterministic.
+var runOffUI = func(job, fn func()) {
+	go func() {
+		job()
+		mygo.RunOnMain(fn)
+	}()
+}
+
+// schedule runs job off the UI thread and fn back on it. fn is skipped when
+// another job started in the meantime; its result is stale. Both job's
+// writes and fn must only touch state through the closure variables job
+// filled and fn reads: state fields are only touched on the UI thread.
+func (s *ipamState) schedule(job, fn func()) {
+	s.gen++
+	gen := s.gen
+	s.busy = true
+	runOffUI(job, func() {
+		if gen != s.gen {
+			return
+		}
+		s.busy = false
+		fn()
+		s.redraw()
+	})
+}
+
+// redraw asks the window for a new frame; nothing to ask for before the
+// first frame, which reads the state as it is then.
+func (s *ipamState) redraw() {
+	if s.invalidate != nil {
+		s.invalidate()
+	}
+}
+
+// pageResult is what one page load gathers off the UI thread.
+type pageResult struct {
+	searching    bool
+	stats        ipam.Stats
+	entries      []ipam.AddressEntry
+	results      []ipam.AddressEntry
+	matches      uint64
+	offset       uint64 // the offset the entries were read at, after fixes
+	searchOffset uint64
+	err          string
+}
+
+// fetchPage gathers the counts and the entries the grid shows for the given
+// selection: the matches while searching, else a page of the address range.
+// It runs on the job goroutine, so it must not touch state.
+func fetchPage(store *ipam.Store, network int64, offset uint64, searching bool, query string, searchOffset uint64) pageResult {
+	var res pageResult
+	res.searching = searching
+	stats, err := store.Stats(network)
+	if err != nil {
+		res.err = "Could not read address counts: " + err.Error()
+		return res
+	}
+	res.stats = stats
+
+	if searching {
+		results, total, err := store.SearchAssignments(network, query, searchOffset, ipamPageSize)
+		if err == nil && len(results) == 0 && total > 0 && searchOffset > 0 {
+			// The page vanished, e.g. after removing assignments: start over.
+			searchOffset = 0
+			results, total, err = store.SearchAssignments(network, query, 0, ipamPageSize)
+		}
+		if err != nil {
+			res.err = "Could not search: " + err.Error()
+			return res
+		}
+		res.results = results
+		res.matches = total
+		res.searchOffset = searchOffset
+		return res
+	}
+
+	entries, err := store.Addresses(network, offset, ipamPageSize)
+	if err != nil {
+		if errors.Is(err, ipam.ErrOffsetOutOfRange) {
+			offset = 0
+			entries, err = store.Addresses(network, 0, ipamPageSize)
+		}
+		if err != nil {
+			res.err = "Could not read addresses: " + err.Error()
+			return res
+		}
+	}
+	res.entries = entries
+	res.offset = offset
+	return res
+}
+
+// applyPage stores what a finished page load delivered.
+func (s *ipamState) applyPage(p pageResult) {
+	if p.err != "" {
+		s.err = p.err
+		return
+	}
+	s.stats = p.stats
+	if p.searching {
+		s.results = p.results
+		s.matches = p.matches
+		s.searchOffset = p.searchOffset
+	} else {
+		s.entries = p.entries
+		s.offset = p.offset
+	}
 }
 
 func (s *ipamState) attach(store *ipam.Store) {
@@ -78,7 +197,7 @@ func (s *ipamState) attach(store *ipam.Store) {
 }
 
 // refresh reloads the saved networks and keeps the selected one when it still
-// exists.
+// exists. The database work runs off the UI thread.
 func (s *ipamState) refresh() {
 	s.err = ""
 	if s.store == nil {
@@ -88,36 +207,57 @@ func (s *ipamState) refresh() {
 		return
 	}
 
-	networks, err := s.store.Networks()
-	if err != nil {
-		s.err = "Could not read saved networks: " + err.Error()
-		return
-	}
-	s.networks = networks
-
-	if len(networks) == 0 {
-		s.network = 0
-		s.entries = nil
-		s.stats = ipam.Stats{}
-		s.resetSearch()
-		s.clearEdit()
-		return
-	}
-
-	found := false
-	for _, n := range networks {
-		if n.ID == s.network {
-			found = true
-			break
+	store := s.store
+	keep, keepOffset := s.network, s.offset
+	var (
+		networks     []ipam.Network
+		loadErr      string
+		selected     int64
+		resetToFirst bool
+		page         pageResult
+	)
+	s.schedule(func() {
+		ns, err := store.Networks()
+		if err != nil {
+			loadErr = "Could not read saved networks: " + err.Error()
+			return
 		}
-	}
-	if !found {
-		s.network = networks[0].ID
-		s.offset = 0
-		s.resetSearch()
-		s.clearEdit()
-	}
-	s.loadPage()
+		networks = ns
+		if len(ns) == 0 {
+			return
+		}
+		selected = keep
+		for i := range ns {
+			if ns[i].ID == keep {
+				page = fetchPage(store, selected, keepOffset, false, "", 0)
+				return
+			}
+		}
+		selected = ns[0].ID
+		resetToFirst = true
+		page = fetchPage(store, selected, 0, false, "", 0)
+	}, func() {
+		if loadErr != "" {
+			s.err = loadErr
+			return
+		}
+		s.networks = networks
+		if len(networks) == 0 {
+			s.network = 0
+			s.entries = nil
+			s.stats = ipam.Stats{}
+			s.resetSearch()
+			s.clearEdit()
+			return
+		}
+		s.network = selected
+		if resetToFirst {
+			s.offset = 0
+			s.resetSearch()
+			s.clearEdit()
+		}
+		s.applyPage(page)
+	})
 }
 
 func (s *ipamState) current() *ipam.Network {
@@ -143,7 +283,8 @@ func (s *ipamState) selectNetwork(id int64) {
 }
 
 // loadPage reloads the counts and the entries the grid shows: the matches
-// while searching, else the page of the address range at offset.
+// while searching, else the page of the address range at offset. The
+// database work runs off the UI thread.
 func (s *ipamState) loadPage() {
 	s.err = ""
 	s.editErr = ""
@@ -158,45 +299,15 @@ func (s *ipamState) loadPage() {
 		return
 	}
 
-	stats, err := s.store.Stats(s.network)
-	if err != nil {
-		s.err = "Could not read address counts: " + err.Error()
-		return
-	}
-	s.stats = stats
-
-	if s.searching {
-		s.loadSearch()
-		return
-	}
-
-	entries, err := s.store.Addresses(s.network, s.offset, ipamPageSize)
-	if err != nil {
-		if errors.Is(err, ipam.ErrOffsetOutOfRange) {
-			s.offset = 0
-			entries, err = s.store.Addresses(s.network, 0, ipamPageSize)
-		}
-		if err != nil {
-			s.err = "Could not read addresses: " + err.Error()
-			return
-		}
-	}
-	s.entries = entries
-}
-
-func (s *ipamState) loadSearch() {
-	results, total, err := s.store.SearchAssignments(s.network, s.searchQuery, s.searchOffset, ipamPageSize)
-	if err == nil && len(results) == 0 && total > 0 && s.searchOffset > 0 {
-		// The page vanished, e.g. after removing assignments: start over.
-		s.searchOffset = 0
-		results, total, err = s.store.SearchAssignments(s.network, s.searchQuery, 0, ipamPageSize)
-	}
-	if err != nil {
-		s.err = "Could not search: " + err.Error()
-		return
-	}
-	s.results = results
-	s.matches = total
+	store := s.store
+	network, offset := s.network, s.offset
+	searching, query, searchOffset := s.searching, s.searchQuery, s.searchOffset
+	var page pageResult
+	s.schedule(func() {
+		page = fetchPage(store, network, offset, searching, query, searchOffset)
+	}, func() {
+		s.applyPage(page)
+	})
 }
 
 // shown is the list of entries the grid draws.
@@ -322,26 +433,47 @@ func (s *ipamState) submitSearch() {
 	s.loadPage()
 }
 
-// jumpTo shows the page that holds addr and selects it.
+// jumpTo shows the page that holds addr and selects it. The database work
+// runs off the UI thread.
 func (s *ipamState) jumpTo(addr netip.Addr) {
-	offset, err := s.store.Offset(s.network, addr)
-	if err != nil {
-		if errors.Is(err, ipam.ErrAddressNotInNetwork) {
-			s.searchMsg = addr.String() + " is not a usable address in this network."
-		} else {
-			s.err = "Could not find the address: " + err.Error()
+	store := s.store
+	network := s.network
+	var (
+		page         pageResult
+		offset       uint64
+		notInNetwork bool
+		loadErr      string
+	)
+	s.schedule(func() {
+		off, err := store.Offset(network, addr)
+		if err != nil {
+			if errors.Is(err, ipam.ErrAddressNotInNetwork) {
+				notInNetwork = true
+			} else {
+				loadErr = "Could not find the address: " + err.Error()
+			}
+			return
 		}
-		return
-	}
-	s.searching = false
-	s.searchQuery = ""
-	s.searchOffset = 0
-	s.results = nil
-	s.matches = 0
-	s.searchInput = addr.String()
-	s.offset = offset / ipamPageSize * ipamPageSize
-	s.loadPage()
-	s.selectByOffset(offset)
+		offset = off
+		page = fetchPage(store, network, off/ipamPageSize*ipamPageSize, false, "", 0)
+	}, func() {
+		if notInNetwork {
+			s.searchMsg = addr.String() + " is not a usable address in this network."
+			return
+		}
+		if loadErr != "" {
+			s.err = loadErr
+			return
+		}
+		s.searching = false
+		s.searchQuery = ""
+		s.searchOffset = 0
+		s.results = nil
+		s.matches = 0
+		s.searchInput = addr.String()
+		s.applyPage(page)
+		s.selectByOffset(offset)
+	})
 }
 
 // selectByOffset starts editing the loaded entry at offset, if there is one.
@@ -366,39 +498,64 @@ func (s *ipamState) locateEdit() {
 
 // nextFree selects the first free address after the selected one, wrapping to
 // the start of the network. Repeated clicks walk through the free addresses.
+// The database work runs off the UI thread.
 func (s *ipamState) nextFree() {
 	s.searchMsg = ""
 	if s.store == nil || s.current() == nil {
 		return
 	}
-	var from uint64
-	if s.editAddr.IsValid() {
-		if offset, err := s.store.Offset(s.network, s.editAddr); err == nil {
-			from = offset + 1
+	store := s.store
+	network := s.network
+	fromAddr := s.editAddr
+	var (
+		page    pageResult
+		entry   ipam.AddressEntry
+		found   bool
+		loadErr string
+		noFree  bool
+	)
+	s.schedule(func() {
+		var from uint64
+		if fromAddr.IsValid() {
+			if offset, err := store.Offset(network, fromAddr); err == nil {
+				from = offset + 1
+			}
 		}
-	}
-	entry, ok, err := s.store.NextFree(s.network, from)
-	if err == nil && !ok && from > 0 {
-		entry, ok, err = s.store.NextFree(s.network, 0)
-	}
-	if err != nil {
-		s.err = "Could not find a free address: " + err.Error()
-		return
-	}
-	if !ok {
-		s.searchMsg = "This network has no free addresses."
-		return
-	}
-	s.searching = false
-	s.searchQuery = ""
-	s.searchOffset = 0
-	s.results = nil
-	s.matches = 0
-	s.searchInput = ""
-	s.offset = entry.Offset / ipamPageSize * ipamPageSize
-	s.loadPage()
-	s.beginEdit(entry)
-	s.reveal = true
+		e, ok, err := store.NextFree(network, from)
+		if err == nil && !ok && from > 0 {
+			e, ok, err = store.NextFree(network, 0)
+		}
+		if err != nil {
+			loadErr = "Could not find a free address: " + err.Error()
+			return
+		}
+		if !ok {
+			noFree = true
+			return
+		}
+		entry, found = e, true
+		page = fetchPage(store, network, e.Offset/ipamPageSize*ipamPageSize, false, "", 0)
+	}, func() {
+		if loadErr != "" {
+			s.err = loadErr
+			return
+		}
+		if noFree {
+			s.searchMsg = "This network has no free addresses."
+			return
+		}
+		s.searching = false
+		s.searchQuery = ""
+		s.searchOffset = 0
+		s.results = nil
+		s.matches = 0
+		s.searchInput = ""
+		s.applyPage(page)
+		if found {
+			s.beginEdit(entry)
+			s.reveal = true
+		}
+	})
 }
 
 func (s *ipamState) beginEdit(entry ipam.AddressEntry) {
@@ -415,6 +572,8 @@ func (s *ipamState) clearEdit() {
 	s.editErr = ""
 }
 
+// assign saves the edited assignment and reloads the page. The database
+// work runs off the UI thread.
 func (s *ipamState) assign() {
 	if s.store == nil {
 		s.editErr = "The IPAM database is unavailable."
@@ -424,13 +583,32 @@ func (s *ipamState) assign() {
 		s.editErr = "Select an address first."
 		return
 	}
-	if err := s.store.Assign(s.network, s.editAddr, s.editLabel, s.editOwner); err != nil {
-		s.editErr = "Could not save the assignment: " + err.Error()
-		return
-	}
-	s.loadPage()
+	store := s.store
+	network, addr, label, owner := s.network, s.editAddr, s.editLabel, s.editOwner
+	offset, searching, query, searchOffset := s.offset, s.searching, s.searchQuery, s.searchOffset
+	var (
+		page    pageResult
+		saveErr string
+	)
+	s.schedule(func() {
+		if err := store.Assign(network, addr, label, owner); err != nil {
+			saveErr = "Could not save the assignment: " + err.Error()
+			return
+		}
+		page = fetchPage(store, network, offset, searching, query, searchOffset)
+	}, func() {
+		if saveErr != "" {
+			s.editErr = saveErr
+			return
+		}
+		s.err = ""
+		s.editErr = ""
+		s.applyPage(page)
+	})
 }
 
+// unassign removes the edited assignment and reloads the page. The database
+// work runs off the UI thread.
 func (s *ipamState) unassign() {
 	if s.store == nil {
 		s.editErr = "The IPAM database is unavailable."
@@ -440,11 +618,28 @@ func (s *ipamState) unassign() {
 		s.editErr = "Select an address first."
 		return
 	}
-	if err := s.store.Unassign(s.network, s.editAddr); err != nil {
-		s.editErr = "Could not remove the assignment: " + err.Error()
-		return
-	}
-	s.loadPage()
+	store := s.store
+	network, addr := s.network, s.editAddr
+	offset, searching, query, searchOffset := s.offset, s.searching, s.searchQuery, s.searchOffset
+	var (
+		page    pageResult
+		saveErr string
+	)
+	s.schedule(func() {
+		if err := store.Unassign(network, addr); err != nil {
+			saveErr = "Could not remove the assignment: " + err.Error()
+			return
+		}
+		page = fetchPage(store, network, offset, searching, query, searchOffset)
+	}, func() {
+		if saveErr != "" {
+			s.editErr = saveErr
+			return
+		}
+		s.err = ""
+		s.editErr = ""
+		s.applyPage(page)
+	})
 }
 
 func (s *ipamState) beginRename() {
@@ -463,6 +658,8 @@ func (s *ipamState) cancelRename() {
 	s.renameErr = ""
 }
 
+// rename saves the new network name and reloads the list. The database work
+// runs off the UI thread.
 func (s *ipamState) rename() {
 	if s.store == nil {
 		s.renameErr = "The IPAM database is unavailable."
@@ -471,12 +668,21 @@ func (s *ipamState) rename() {
 	if s.current() == nil {
 		return
 	}
-	if _, err := s.store.RenameNetwork(s.network, s.renameName); err != nil {
-		s.renameErr = "Could not rename the network: " + err.Error()
-		return
-	}
-	s.cancelRename()
-	s.refresh()
+	store := s.store
+	network, name := s.network, s.renameName
+	var renameErr string
+	s.schedule(func() {
+		if _, err := store.RenameNetwork(network, name); err != nil {
+			renameErr = "Could not rename the network: " + err.Error()
+		}
+	}, func() {
+		if renameErr != "" {
+			s.renameErr = renameErr
+			return
+		}
+		s.cancelRename()
+		s.refresh()
+	})
 }
 
 // beginDelete opens the confirmation dialog for the current network.
@@ -491,6 +697,8 @@ func (s *ipamState) cancelDelete() {
 	s.confirmDelete = false
 }
 
+// deleteNetwork removes the current network and selects another one. The
+// database work runs off the UI thread.
 func (s *ipamState) deleteNetwork() {
 	if s.store == nil {
 		s.err = "The IPAM database is unavailable."
@@ -499,33 +707,56 @@ func (s *ipamState) deleteNetwork() {
 	if s.network == 0 {
 		return
 	}
-	if err := s.store.DeleteNetwork(s.network); err != nil {
-		s.confirmDelete = false // close the dialog so the alert behind it is visible
-		s.err = "Could not delete the network: " + err.Error()
-		return
-	}
-	s.confirmDelete = false
-	s.network = 0
-	s.offset = 0
-	s.resetSearch()
-	s.clearEdit()
-	s.cancelRename()
-	s.refresh()
+	store := s.store
+	network := s.network
+	var delErr string
+	s.schedule(func() {
+		if err := store.DeleteNetwork(network); err != nil {
+			delErr = "Could not delete the network: " + err.Error()
+		}
+	}, func() {
+		if delErr != "" {
+			// Close the dialog so the alert behind it is visible.
+			s.confirmDelete = false
+			s.err = delErr
+			return
+		}
+		s.confirmDelete = false
+		s.network = 0
+		s.offset = 0
+		s.resetSearch()
+		s.clearEdit()
+		s.cancelRename()
+		s.refresh()
+	})
 }
 
-func (s *ipamState) saveNetwork(cidr, name string) (ipam.Network, error) {
+// saveNetwork stores a new network and makes it the selected one. The
+// database work runs off the UI thread; done is called back on the UI
+// thread with the saved network or the error.
+func (s *ipamState) saveNetwork(cidr, name string, done func(ipam.Network, error)) {
 	if s.store == nil {
-		return ipam.Network{}, fmt.Errorf("the IPAM database is unavailable")
+		done(ipam.Network{}, fmt.Errorf("the IPAM database is unavailable"))
+		return
 	}
-	saved, err := s.store.SaveNetwork(cidr, name)
-	if err != nil {
-		return ipam.Network{}, err
-	}
-	s.network = saved.ID
-	s.offset = 0
-	s.resetSearch()
-	s.refresh()
-	return saved, nil
+	store := s.store
+	var (
+		saved ipam.Network
+		err   error
+	)
+	s.schedule(func() {
+		saved, err = store.SaveNetwork(cidr, name)
+	}, func() {
+		if err != nil {
+			done(ipam.Network{}, err)
+			return
+		}
+		s.network = saved.ID
+		s.offset = 0
+		s.resetSearch()
+		s.refresh()
+		done(saved, nil)
+	})
 }
 
 // ipamLayout adapts the page to the window: short windows fold the network
@@ -714,19 +945,23 @@ func (a *App) ipamToolbar(c *myui.Context, l ipamLayout) {
 				MinWidth(180)
 			search.OnSubmit(s.submitSearch)
 
-			myui.PrimaryButton(c, "Search").Key("search").OnClick(s.submitSearch)
+			// While a load is in flight the buttons stand down; the load
+			// applies when it lands and supersedes clicks meanwhile.
+			searchButton := myui.PrimaryButton(c, "Search").Key("search").OnClick(s.submitSearch)
+			searchButton.Disabled(s.busy)
 			if s.searching || s.searchInput != "" {
 				myui.Button(c, "Clear").Key("clear").OnClick(s.clearSearch)
 			}
-			myui.Button(c, "Next free").Key("next-free").Tooltip("Select the next free address").OnClick(s.nextFree)
+			nextFreeButton := myui.Button(c, "Next free").Key("next-free").Tooltip("Select the next free address").OnClick(s.nextFree)
+			nextFreeButton.Disabled(s.busy)
 
 			offset, total := s.pager()
 			myui.Row(c).Key("pager").Gap(spaceS).AlignItems(myui.Center).Children(func() {
 				previous := myui.Button(c, "Prev").Key("prev").OnClick(s.previousPage)
-				previous.Disabled(offset == 0)
+				previous.Disabled(offset == 0 || s.busy)
 				myui.Text(c, s.pageLabel(l.narrow)).FontSize(12).TextColor(t.TextMuted)
 				next := myui.Button(c, "Next").Key("next").OnClick(s.nextPage)
-				next.Disabled(offset+ipamPageSize >= total)
+				next.Disabled(offset+ipamPageSize >= total || s.busy)
 			})
 		})
 		if s.searchMsg != "" {

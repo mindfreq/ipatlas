@@ -138,6 +138,9 @@ func (a *App) SetStore(store *ipam.Store) {
 
 // View builds the application shell and the selected section.
 func (a *App) View(c *myui.Context) {
+	// The IPAM page loads its database work on a goroutine and asks for a
+	// new frame when the results land; keep the hook current every frame.
+	a.ipam.invalidate = c.Services().Invalidate
 	t := appTheme(c, a.darkMode(c.Theme().Dark))
 	if a.tab < 0 || a.tab >= len(tabLabels) {
 		a.tab = 0

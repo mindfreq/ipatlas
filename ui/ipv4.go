@@ -7,6 +7,7 @@ import (
 
 	myui "github.com/egoist/mygo/ui"
 
+	"ipatlas/internal/ipam"
 	"ipatlas/internal/netcalc"
 )
 
@@ -123,14 +124,16 @@ func (a *App) saveCurrentIPv4() {
 		return
 	}
 
-	saved, err := a.ipam.saveNetwork(cidrString(*s.result), s.saveName)
-	if err != nil {
-		s.saveErr = true
-		s.saveMsg = "Could not save to IPAM: " + err.Error()
-		return
-	}
-	s.saveName = ""
-	s.saveMsg = "Saved " + saved.CIDR + " to IPAM."
+	// The save runs off the UI thread; the callback reports back on it.
+	a.ipam.saveNetwork(cidrString(*s.result), s.saveName, func(saved ipam.Network, err error) {
+		if err != nil {
+			s.saveErr = true
+			s.saveMsg = "Could not save to IPAM: " + err.Error()
+			return
+		}
+		s.saveName = ""
+		s.saveMsg = "Saved " + saved.CIDR + " to IPAM."
+	})
 }
 
 func cidrString(s netcalc.IPv4Subnet) string {

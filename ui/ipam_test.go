@@ -11,6 +11,16 @@ import (
 	"ipatlas/internal/ipam"
 )
 
+// The IPAM page does its database work on a goroutine and reports back on
+// the UI thread. Tests run the whole round-trip synchronously so the state
+// is deterministic right after a click.
+func init() {
+	runOffUI = func(job, fn func()) {
+		job()
+		fn()
+	}
+}
+
 func openIPAM(t *testing.T) (*ipam.Store, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "ipam.db")
@@ -351,7 +361,11 @@ func TestIPAMStateErrors(t *testing.T) {
 	if s.storeErr == "" {
 		t.Error("loadPage without a store left no error")
 	}
-	if _, err := s.saveNetwork("10.0.0.0/24", ""); err == nil {
+	saved := false
+	s.saveNetwork("10.0.0.0/24", "", func(_ ipam.Network, err error) {
+		saved = err == nil
+	})
+	if saved {
 		t.Error("saveNetwork without a store succeeded")
 	}
 	s.assign()
