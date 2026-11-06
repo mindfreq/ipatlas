@@ -18,6 +18,11 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install NSIS (Windows installer)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nsis
+
       - name: Read version from mygo.json
         id: ver
         run: |
@@ -34,68 +39,6 @@ jobs:
       - name: List artifacts
         run: find build -type f | sort
 
-      - name: Set up fpm for RPM
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ruby ruby-dev rpm
-          sudo gem install fpm --no-document
-
-      - name: Build RPM packages
-        run: |
-          for arch in amd64 arm64; do
-            rpm_arch=$([ "$arch" = amd64 ] && echo x86_64 || echo aarch64)
-            fpm -s deb -t rpm \
-              --architecture "$rpm_arch" \
-              --name ipatlas \
-              --version "${{ steps.ver.outputs.version }}" \
-              -p "build/ipatlas_${{ steps.ver.outputs.version }}_${arch}.rpm" \
-              "build/linux-$arch/ipatlas_${{ steps.ver.outputs.version }}_${arch}.deb"
-          done
-
-      # ---------- AppImage (amd64 و arm64) ----------
-      - name: Set up QEMU for arm64 AppImage
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      - name: Install linuxdeploy
-        run: |
-          mkdir -p "$HOME/.local/bin" appimage
-          for arch_pair in x86_64:amd64 aarch64:arm64; do
-            ld_arch=${arch_pair%%:*}
-            curl -fL -o "linuxdeploy-$ld_arch.AppImage" \
-              "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-$ld_arch.AppImage"
-            chmod +x "linuxdeploy-$ld_arch.AppImage"
-          done
-
-      - name: Build AppImages
-        run: |
-          VERSION=${{ steps.ver.outputs.version }}
-          for pair in x86_64:amd64 aarch64:arm64; do
-            ld_arch=${pair%%:*}; go_arch=${pair##*:}
-            rm -rf AppDir && mkdir -p AppDir/usr/bin AppDir/usr/share/applications
-            bin="build/linux-$go_arch/ipatlas"
-            [ -f "$bin" ] || { echo "binary for $go_arch not found"; exit 1; }
-            install "$bin" AppDir/usr/bin/ipatlas
-            cat > AppDir/usr/share/applications/ipatlas.desktop <<EOF
-          [Desktop Entry]
-          Type=Application
-          Name=IPAtlas
-          Comment=Subnet toolkit
-          Exec=ipatlas
-          Icon=ipatlas
-          Categories=Network;Utility;
-          Terminal=false
-          EOF
-            install -Dm644 "build/linux-$go_arch/ipatlas-512x512.png" AppDir/usr/share/icons/hicolor/512x512/apps/ipatlas.png
-            OUTPUT="ipatlas-$VERSION-$go_arch.AppImage" \
-              "./linuxdeploy-$ld_arch.AppImage" --appimage-extract-and-run \
-              --appdir AppDir --output appimage \
-              -d AppDir/usr/share/applications/ipatlas.desktop \
-              -i AppDir/usr/share/icons/hicolor/512x512/apps/ipatlas.png
-            mv "ipatlas-$VERSION-$go_arch.AppImage" build/
-          done
-
       - name: Create draft release and upload artifacts
         uses: softprops/action-gh-release@v2
         with:
@@ -106,6 +49,4 @@ jobs:
           files: |
             build/linux-*/*.deb
             build/linux-*/*-linux-*.tar.gz
-            build/windows-*/*.exe
-            build/*.rpm
-            build/*.AppImage
+            build/windows-*/*-setup-*.exe
