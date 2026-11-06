@@ -98,7 +98,6 @@ requires root, a real network or ICMP permission.
 | `internal/ipam` | SQLite schema, migrations, networks and assignments |
 | `internal/scanner` | Bounded TCP scan, optional ICMP, ARP-table parsing |
 | `resources/` | App icon |
-| `VERIFIED_APIS.md` | MyGo APIs used, with `go doc` evidence |
 
 ## Scanner notes
 
