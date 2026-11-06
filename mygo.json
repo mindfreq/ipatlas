@@ -1,7 +1,7 @@
 {
   "name": "IPAtlas",
   "identifier": "com.ipatlas.app",
-  "version": "0.2.0",
+  "version": "0.5.0",
   "out": "build",
   "linux": {
     "categories": ["Network", "Utility"],
