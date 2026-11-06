@@ -50,6 +50,15 @@ type scanSnapshot struct {
 	err        string
 }
 
+// Filter segments for the results grid, indexes of myui.Segmented.
+const (
+	scanAll = iota
+	scanAlive
+	scanSilent
+	scanNoAnswer
+	scanPorts
+)
+
 type scanState struct {
 	mu sync.Mutex
 
@@ -57,6 +66,9 @@ type scanState struct {
 	icmp    bool
 	ports   []int
 	timeout time.Duration
+
+	filter int
+	search string
 
 	running  bool
 	stopped  bool
@@ -371,10 +383,26 @@ func (a *App) scanResults(c *myui.Context, snap scanSnapshot) {
 		if left := snap.total - snap.done; left > 0 && !snap.running {
 			alert(c, fmt.Sprintf("%d not scanned", left), t.Warning)
 		}
-		a.scanLegend(c)
+		a.scanFilter(c, snap)
 		a.scanGrid(c, snap)
 	})
 	result.Grow(1)
+}
+
+// scanFilter draws the segmented state filter and the search box that scope
+// the results grid. They work while the scan runs and after it ends.
+func (a *App) scanFilter(c *myui.Context, snap scanSnapshot) {
+	s := &a.scan
+	myui.Row(c).Gap(spaceM).AlignItems(myui.Center).Wrap().Children(func() {
+		myui.Segmented(c, &s.filter,
+			"All", "Alive", "Silent", "No answer", "With ports",
+		).Label("Filter results")
+		myui.Spacer(c)
+		myui.TextInput(c, &s.search).
+			Label("Search results").
+			Placeholder("Address, label, MAC or port").
+			Width(240)
+	})
 }
 
 func (a *App) scanProgress(c *myui.Context, snap scanSnapshot) {
@@ -385,38 +413,78 @@ func (a *App) scanProgress(c *myui.Context, snap scanSnapshot) {
 	progressBar(c, float32(done), float32(snap.total))
 }
 
-func (a *App) scanLegend(c *myui.Context) {
-	t := c.Theme()
-	legend := func(color myui.Color, label string) {
-		myui.Row(c).Gap(6).AlignItems(myui.Center).Children(func() {
-			dot(c, color)
-			myui.Text(c, label).FontSize(11).TextColor(t.TextMuted)
-		})
-	}
-	myui.Row(c).Gap(spaceL).AlignItems(myui.Center).Wrap().Children(func() {
-		legend(t.Success, "alive")
-		legend(t.Warning, "documented but silent")
-		legend(t.TextMuted, "no answer")
-	})
-}
-
 func (a *App) scanGrid(c *myui.Context, snap scanSnapshot) {
 	t := c.Theme()
+	visible := 0
 	myui.Scroll(c).Grow(1).MinHeight(120).Children(func() {
-		myui.Grid(c).Columns(columnsFor(c, 190, 6)).Gap(spaceS).Children(func() {
+		// Fewer, roomier columns than the IPAM grid, so an address and its
+		// ports stay readable while the user looks through the results.
+		myui.Grid(c).Columns(columnsFor(c, 230, 5)).Gap(spaceS).Children(func() {
 			for _, host := range snap.hosts {
+				if !scanMatches(host, a.scan.filter, a.scan.search) {
+					continue
+				}
+				visible++
 				host := host
 				color := scanColor(t, host.State)
 				tile(c, host.Addr.String(), func() {
-					myui.Row(c).Gap(6).AlignItems(myui.Center).Children(func() {
+					myui.Row(c).Gap(7).AlignItems(myui.Center).Children(func() {
 						dot(c, color)
-						myui.Text(c, host.Addr.String()).FontSize(11.5).TextColor(color)
+						myui.Text(c, host.Addr.String()).FontSize(13).FontWeight(650).TextColor(color)
 					})
-					myui.Text(c, scanDetail(host)).FontSize(10).SingleLine().TextColor(t.TextMuted)
+					myui.Text(c, scanDetail(host)).FontSize(11.5).SingleLine().TextColor(t.TextMuted)
 				})
 			}
 		})
+		if visible == 0 {
+			myui.Column(c).Grow(1).Center().Children(func() {
+				myui.Text(c, "No addresses match this filter.").FontSize(12.5).TextColor(t.TextMuted)
+			})
+		}
 	})
+}
+
+// scanMatches reports whether a host passes the segmented filter and the
+// search query, which may match the address, label, MAC or any open port.
+func scanMatches(host scanHost, filter int, query string) bool {
+	switch filter {
+	case scanAlive:
+		if host.State != hostAlive {
+			return false
+		}
+	case scanSilent:
+		if host.State != hostDocumentedSilent {
+			return false
+		}
+	case scanNoAnswer:
+		if host.State != hostNoAnswer {
+			return false
+		}
+	case scanPorts:
+		if len(host.Ports) == 0 {
+			return false
+		}
+	}
+
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return true
+	}
+	if strings.Contains(host.Addr.String(), query) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(host.Label), query) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(host.MAC), query) {
+		return true
+	}
+	for _, port := range host.Ports {
+		if query == strconv.Itoa(port) {
+			return true
+		}
+	}
+	return false
 }
 
 func scanColor(t *myui.Theme, state hostState) myui.Color {

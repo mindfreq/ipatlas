@@ -272,7 +272,7 @@ func TestScanDocumentsIPAMAddresses(t *testing.T) {
 	}
 }
 
-func TestScanStateInitialButtons(t *testing.T) {
+func TestScanViewInitialButtons(t *testing.T) {
 	a := New()
 	tt := myui.NewTester(a.View, 1100, 720)
 	if err := tt.Click("Scan"); err != nil {
@@ -280,5 +280,72 @@ func TestScanStateInitialButtons(t *testing.T) {
 	}
 	if !tt.HasText("Start scan") || !tt.HasText("Stop scan") {
 		t.Errorf("texts %q do not show both scan buttons", tt.Texts())
+	}
+}
+
+// TestScanViewFilter scopes the results grid with the segmented filter and
+// the search box after a scan finds one alive host.
+func TestScanViewFilter(t *testing.T) {
+	port := openPort(t)
+	a := New()
+	a.scan.ports = []int{port}
+	tt := myui.NewTester(a.View, 1100, 720)
+
+	if err := tt.Click("Scan"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("Scan target"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("127.0.0.1/32")
+	if err := tt.Click("Start scan"); err != nil {
+		t.Fatal(err)
+	}
+	if snap := waitScan(t, &a.scan); snap.alive != 1 {
+		t.Fatalf("snapshot = %+v, want one alive host", snap)
+	}
+	tt.Frame()
+	if !tt.HasText("127.0.0.1") {
+		t.Fatalf("texts %q do not show the result tile", tt.Texts())
+	}
+
+	// The no-answer filter hides the alive host.
+	if err := tt.Click("No answer"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if tt.HasText("127.0.0.1") {
+		t.Error("no-answer filter still shows the alive tile")
+	}
+	if !tt.HasText("No addresses match this filter") {
+		t.Errorf("texts %q do not show the empty filter message", tt.Texts())
+	}
+
+	// The alive filter brings it back.
+	if err := tt.Click("Alive"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("127.0.0.1") {
+		t.Error("alive filter hides the alive tile")
+	}
+
+	// A query that matches nothing clears the grid again.
+	if err := tt.Click("Search results"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("no-such-host")
+	tt.Frame()
+	if tt.HasText("127.0.0.1") {
+		t.Error("search that matches nothing still shows the tile")
+	}
+
+	// Resetting the filter and search restores the grid.
+	a.scan.search = ""
+	a.scan.filter = scanAll
+	tt2 := myui.NewTester(a.View, 1100, 720)
+	tt2.Frame()
+	if !tt2.HasText("127.0.0.1") {
+		t.Error("all filter with empty search hides the tile")
 	}
 }

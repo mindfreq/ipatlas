@@ -112,7 +112,7 @@ func (a *App) View(c *myui.Context) {
 	pad := pagePadding(w)
 	myui.Row(c).Fill().Children(func() {
 		a.navRail(c, t)
-		myui.Column(c).Fill().Grow(1).MinWidth(0).Padding(pad, pad, pad, pad).Gap(spaceXL).Children(func() {
+		myui.Column(c).Fill().FillHeight().Grow(1).MinWidth(0).Padding(pad, pad, pad, pad).Gap(spaceXL).Children(func() {
 			a.pageHeader(c, t)
 			a.sectionView(c)
 		})
