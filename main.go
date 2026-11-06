@@ -18,6 +18,10 @@ var iconPNG []byte
 func main() {
 	a := appui.New()
 	mygo.App.WhenReady(func() {
+		// The packaged and dev builds carry the version from mygo.json;
+		// a raw go run has none.
+		a.SetVersion(mygo.App.Version())
+
 		var store *ipam.Store
 		if dir, err := mygo.App.Path(mygo.PathUserData); err != nil {
 			log.Printf("ipam: user data directory: %v", err)

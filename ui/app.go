@@ -8,7 +8,7 @@ import (
 	"ipatlas/internal/ipam"
 )
 
-var tabLabels = []string{"IPv4", "VLSM", "IPv6", "IPAM", "Scan"}
+var tabLabels = []string{"IPv4", "VLSM", "IPv6", "IPAM", "Scan", "About"}
 
 // Rail geometry. The logo sits at the same place in both modes, and the
 // small toggle sits at its right: after the name when open, directly next to
@@ -54,6 +54,10 @@ var sections = []section{
 		title: "Live scan",
 		blurb: "Probe a network with a bounded worker pool and colour every address by its state.",
 	},
+	{
+		title: "About IPAtlas",
+		blurb: "What this toolkit is, how it treats your data, and what it is built with.",
+	},
 }
 
 // App is the state the window shows. Its View builds the interface from it,
@@ -61,12 +65,18 @@ var sections = []section{
 type App struct {
 	tab          int
 	nav          string
-	navCollapsed bool // false = full sidebar, true = icon-only rail
+	navCollapsed bool   // false = full sidebar, true = icon-only rail
+	version      string // application version from mygo.json, "" in raw go runs
 	ipv4         ipv4State
 	vlsm         vlsmState
 	ipv6         ipv6State
 	ipam         ipamState
 	scan         scanState
+}
+
+// SetVersion records the application version the About page displays.
+func (a *App) SetVersion(v string) {
+	a.version = v
 }
 
 // New returns an application without an IPAM database. The app attaches one
@@ -251,5 +261,7 @@ func (a *App) sectionView(c *myui.Context) {
 		a.ipamView(c)
 	case 4:
 		a.scanView(c)
+	case 5:
+		a.aboutView(c)
 	}
 }
