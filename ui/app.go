@@ -74,6 +74,7 @@ type App struct {
 	nav          string
 	navCollapsed bool   // false = full sidebar, true = icon-only rail
 	version      string // application version from mygo.json, "" in raw go runs
+	logo         *myui.Bitmap
 	ipv4         ipv4State
 	vlsm         vlsmState
 	ipv6         ipv6State
@@ -183,13 +184,23 @@ func (a *App) navToggle(c *myui.Context) {
 	}
 }
 
-// logoMark is the "IP" badge, always the top-left element of the rail.
+// logoMark is the app icon, always the top-left element of the rail. Without
+// a bundled icon it falls back to the "IP" badge.
 func (a *App) logoMark(c *myui.Context, t *myui.Theme) {
+	if a.logo != nil {
+		myui.Image(c, a.logo).Size(railItem, railItem)
+		return
+	}
 	myui.Box(c).Size(railItem, railItem).Radius(11).Background(t.Accent).Children(func() {
 		myui.Column(c).Fill().Center().Children(func() {
 			myui.Text(c, "IP").FontSize(12.5).FontWeight(750).TextColor(t.AccentText)
 		})
 	})
+}
+
+// SetLogo makes the given image the rail's logo mark.
+func (a *App) SetLogo(logo *myui.Bitmap) {
+	a.logo = logo
 }
 
 // navIconButton draws one icon-only entry of the collapsed rail.

@@ -81,6 +81,13 @@ func main() {
 		// a raw go run has none.
 		a.SetVersion(mygo.App.Version())
 
+		// The rail's logo mark is the same icon the window carries.
+		if logo, err := myui.DecodeBitmap(iconPNG); err == nil {
+			a.SetLogo(logo)
+		} else {
+			log.Printf("logo: decode icon: %v", err)
+		}
+
 		// Restore the saved theme before the first frame is drawn, then
 		// save every flip of the rail's toggle.
 		settingsPath := loadSettings(a)
