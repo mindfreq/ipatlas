@@ -41,6 +41,9 @@ func appTheme(c *myui.Context) *myui.Theme {
 	base.Radius = controlRadius
 	base.Spacing = 4
 	base.FontSize = 14
+	// The bundled IBM Plex Sans Arabic face; glyphs it lacks fall back to
+	// the system's choice.
+	base.Font = "IBM Plex Sans Arabic"
 
 	if base.Dark {
 		base.Background = myui.Hex("#0f1115")

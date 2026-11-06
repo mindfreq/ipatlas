@@ -15,9 +15,22 @@ import (
 //go:embed resources/icon.png
 var iconPNG []byte
 
+//go:embed resources/fonts/IBMPlexSansArabic-Regular.ttf
+var fontRegular []byte
+
+//go:embed resources/fonts/IBMPlexSansArabic-Bold.ttf
+var fontBold []byte
+
+// appFontFamily is the family the About fonts register under and the theme
+// uses.
+const appFontFamily = "IBM Plex Sans Arabic"
+
 func main() {
 	a := appui.New()
 	mygo.App.WhenReady(func() {
+		registerFont(fontRegular)
+		registerFont(fontBold)
+
 		// The packaged and dev builds carry the version from mygo.json;
 		// a raw go run has none.
 		a.SetVersion(mygo.App.Version())
@@ -58,5 +71,13 @@ func main() {
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// registerFont makes one bundled IBM Plex Sans Arabic face available to the
+// app's text. A failed bundle only means the system font stays in use.
+func registerFont(data []byte) {
+	if err := myui.RegisterFont(data, appFontFamily); err != nil {
+		log.Printf("font: register %s face: %v", appFontFamily, err)
 	}
 }
