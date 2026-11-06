@@ -84,6 +84,10 @@ type App struct {
 	// after which dark records their choice.
 	darkSet bool
 	dark    bool
+
+	// onThemeChange, when set, is called back with every user flip so the
+	// host can persist the choice.
+	onThemeChange func(dark bool)
 }
 
 // darkMode reports which appearance the window should use, given what the
@@ -93,6 +97,19 @@ func (a *App) darkMode(system bool) bool {
 		return a.dark
 	}
 	return system
+}
+
+// SetThemeChoice restores a saved user choice: dark or light, overriding
+// the system's appearance from the first frame.
+func (a *App) SetThemeChoice(dark bool) {
+	a.darkSet = true
+	a.dark = dark
+}
+
+// OnThemeChange registers the callback that receives every user flip of
+// the theme toggle, to persist it.
+func (a *App) OnThemeChange(fn func(dark bool)) {
+	a.onThemeChange = fn
 }
 
 // SetVersion records the application version the About page displays.
@@ -287,6 +304,9 @@ func (a *App) themeToggle(c *myui.Context) {
 	if btn.Clicked() {
 		a.darkSet = true
 		a.dark = !a.dark
+		if a.onThemeChange != nil {
+			a.onThemeChange(a.dark)
+		}
 	}
 }
 
