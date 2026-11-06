@@ -6,12 +6,26 @@ live TCP host scanner in one window. The interface is drawn by
 [MyGo](https://github.com/egoist/mygo) directly: there is no web view, HTML or
 JavaScript. No data collection.
 
-<p align="center">
+Screenshots
+
+<table>
+<tr>
+<td width="50%">
 <img src="screenshot/1.png" width="100%" alt="Screenshot 1">
+</td>
+<td width="50%">
 <img src="screenshot/2.png" width="100%" alt="Screenshot 2">
+</td>
+</tr>
+<tr>
+<td width="50%">
 <img src="screenshot/3.png" width="100%" alt="Screenshot 3">
+</td>
+<td width="50%">
 <img src="screenshot/4.png" width="100%" alt="Screenshot 4">
-</p>
+</td>
+</tr>
+</table>
 
 
 ## Features
