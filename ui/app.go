@@ -10,6 +10,24 @@ import (
 
 var tabLabels = []string{"IPv4", "VLSM", "IPv6", "IPAM", "Scan"}
 
+// Rail geometry. The logo sits at the same place in both modes, and the
+// small toggle sits at its right: after the name when open, directly next to
+// it when collapsed.
+const (
+	railPad    = 12
+	railItem   = 36 // logo and tab buttons height
+	railGap    = 4  // logo-to-toggle gap when collapsed
+	toggleSize = 24 // hamburger button
+
+	// collapsed width = padding + logo + gap + toggle + padding
+	navCollapsedWidth = railPad*2 + railItem + railGap + toggleSize // 88
+	// width of the content area inside the collapsed rail
+	railInner = navCollapsedWidth - railPad*2 // 64
+)
+
+// menuIcon is the three-line "hamburger" icon of the toggle button.
+var menuIcon = myui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round"><path d="M5 7h14M5 12h14M5 17h14"/></svg>`))
+
 type section struct {
 	title string
 	blurb string
@@ -41,13 +59,14 @@ var sections = []section{
 // App is the state the window shows. Its View builds the interface from it,
 // on the main thread, whenever the window needs a frame.
 type App struct {
-	tab  int
-	nav  string
-	ipv4 ipv4State
-	vlsm vlsmState
-	ipv6 ipv6State
-	ipam ipamState
-	scan scanState
+	tab          int
+	nav          string
+	navCollapsed bool // false = full sidebar, true = icon-only rail
+	ipv4         ipv4State
+	vlsm         vlsmState
+	ipv6         ipv6State
+	ipam         ipamState
+	scan         scanState
 }
 
 // New returns an application without an IPAM database. The app attaches one
@@ -90,29 +109,99 @@ func (a *App) View(c *myui.Context) {
 	})
 }
 
+// navToggle is the small hamburger button, to the right of the logo.
+func (a *App) navToggle(c *myui.Context) {
+	tip := "Collapse sidebar"
+	if a.navCollapsed {
+		tip = "Expand sidebar"
+	}
+	btn := myui.Button(c, "").
+		Key("nav-toggle").
+		Size(toggleSize, toggleSize).
+		Padding(0).
+		Radius(8).
+		Tooltip(tip).
+		Label(tip).
+		Children(func() {
+			myui.Column(c).Fill().Center().Children(func() {
+				myui.Icon(c, menuIcon).Size(20, 20)
+			})
+		})
+	if btn.Clicked() {
+		a.navCollapsed = !a.navCollapsed
+	}
+}
+
+// logoMark is the "IP" badge, always the top-left element of the rail.
+func (a *App) logoMark(c *myui.Context, t *myui.Theme) {
+	myui.Box(c).Size(railItem, railItem).Radius(11).Background(t.Accent).Children(func() {
+		myui.Column(c).Fill().Center().Children(func() {
+			myui.Text(c, "IP").FontSize(12.5).FontWeight(750).TextColor(t.AccentText)
+		})
+	})
+}
+
+// navIconButton draws one icon-only entry of the collapsed rail.
+func (a *App) navIconButton(c *myui.Context, i int) {
+	label := tabLabels[i]
+
+	var btn myui.Element
+	if a.tab == i {
+		btn = myui.PrimaryButton(c, "")
+	} else {
+		btn = myui.Button(c, "")
+	}
+	btn = btn.Key(label).Size(railInner, railItem).Tooltip(label).Label(label).Children(func() {
+		myui.Column(c).Fill().Center().Children(func() {
+			myui.Icon(c, navIcons[i]).Size(18, 18)
+		})
+	})
+	if btn.Clicked() {
+		a.selectTab(label)
+	}
+}
+
 // navRail is the persistent navigation beside every tool.
 func (a *App) navRail(c *myui.Context, t *myui.Theme) {
+	width := float32(navWidth)
+	if a.navCollapsed {
+		width = navCollapsedWidth
+	}
+
 	myui.Column(c).
-		Width(navWidth).
+		Width(width).
 		FillHeight().
-		Padding(14).
+		Padding(railPad).
 		Gap(spaceL).
 		Background(t.Surface).
 		BorderWidth(0, 1, 0, 0).
 		BorderColor(t.Border).
 		Children(func() {
-			myui.Row(c).Gap(10).AlignItems(myui.Center).Padding(2, 2).Children(func() {
-				mark := myui.Box(c).Size(36, 36).Radius(11).Background(t.Accent)
-				mark.Children(func() {
-					myui.Column(c).Fill().Center().Children(func() {
-						myui.Text(c, "IP").FontSize(12.5).FontWeight(750).TextColor(t.AccentText)
+			// Top row: logo first (top-left), small toggle on its right.
+			gap := float32(10)
+			if a.navCollapsed {
+				gap = railGap
+			}
+			myui.Row(c).Gap(gap).AlignItems(myui.Center).Children(func() {
+				a.logoMark(c, t)
+				if !a.navCollapsed {
+					myui.Column(c).Gap(0).Grow(1).Children(func() {
+						myui.Text(c, "IPAtlas").FontSize(16).FontWeight(650)
+						myui.Text(c, "Subnet toolkit").FontSize(11).TextColor(t.TextMuted)
 					})
-				})
-				myui.Column(c).Gap(0).Children(func() {
-					myui.Text(c, "IPAtlas").FontSize(16).FontWeight(650)
-					myui.Text(c, "Subnet toolkit").FontSize(11).TextColor(t.TextMuted)
-				})
+				}
+				a.navToggle(c)
 			})
+
+			// Navigation: icons only when collapsed, full sidebar when open.
+			if a.navCollapsed {
+				myui.Column(c).Gap(6).Grow(1).Children(func() {
+					for i := range tabLabels {
+						a.navIconButton(c, i)
+					}
+				})
+				return
+			}
 
 			myui.Sidebar(c, &a.nav, func() {
 				myui.SidebarSection(c, "Tools", nil, func() {
@@ -120,7 +209,7 @@ func (a *App) navRail(c *myui.Context, t *myui.Theme) {
 						myui.SidebarItem(c, label, navIcons[i], label)
 					}
 				})
-			}).Width(navWidth - 28).Grow(1).OnChange(func() {
+			}).Width(navWidth - railPad*2).Grow(1).OnChange(func() {
 				a.selectTab(a.nav)
 			})
 
@@ -135,6 +224,7 @@ func (a *App) selectTab(label string) {
 	for i, candidate := range tabLabels {
 		if candidate == label {
 			a.tab = i
+			a.nav = label // keep the Sidebar selection in sync
 			return
 		}
 	}
