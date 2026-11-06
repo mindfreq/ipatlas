@@ -30,12 +30,13 @@ var navIcons = []*myui.SVG{
 	myui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg>`)),
 }
 
-// appTheme derives the app's palette from the system's appearance. MyGo
+// appTheme derives the app's palette from the appearance in dark, which is
+// the system's until the user toggles it with the rail's theme button. MyGo
 // documents theming as changing a copy of LightTheme or DarkTheme, so the
 // copy is applied once per frame; the control set stays native.
-func appTheme(c *myui.Context) *myui.Theme {
+func appTheme(c *myui.Context, dark bool) *myui.Theme {
 	base := myui.LightTheme()
-	if c.Theme().Dark {
+	if dark {
 		base = myui.DarkTheme()
 	}
 	base.Radius = controlRadius

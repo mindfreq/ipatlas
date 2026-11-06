@@ -28,6 +28,13 @@ const (
 // menuIcon is the three-line "hamburger" icon of the toggle button.
 var menuIcon = myui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round"><path d="M5 7h14M5 12h14M5 17h14"/></svg>`))
 
+// themeIcons are the appearance-toggle icons: a moon invites dark mode, a
+// sun invites light mode.
+var (
+	moonIcon = myui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>`))
+	sunIcon  = myui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>`))
+)
+
 type section struct {
 	title string
 	blurb string
@@ -72,6 +79,20 @@ type App struct {
 	ipv6         ipv6State
 	ipam         ipamState
 	scan         scanState
+
+	// Appearance: the theme follows the system until the user toggles it,
+	// after which dark records their choice.
+	darkSet bool
+	dark    bool
+}
+
+// darkMode reports which appearance the window should use, given what the
+// system currently shows.
+func (a *App) darkMode(system bool) bool {
+	if a.darkSet {
+		return a.dark
+	}
+	return system
 }
 
 // SetVersion records the application version the About page displays.
@@ -100,7 +121,7 @@ func (a *App) SetStore(store *ipam.Store) {
 
 // View builds the application shell and the selected section.
 func (a *App) View(c *myui.Context) {
-	t := appTheme(c)
+	t := appTheme(c, a.darkMode(c.Theme().Dark))
 	if a.tab < 0 || a.tab >= len(tabLabels) {
 		a.tab = 0
 	}
@@ -210,6 +231,9 @@ func (a *App) navRail(c *myui.Context, t *myui.Theme) {
 						a.navIconButton(c, i)
 					}
 				})
+				myui.Row(c).Fill().Center().Children(func() {
+					a.themeToggle(c)
+				})
 				return
 			}
 
@@ -223,11 +247,44 @@ func (a *App) navRail(c *myui.Context, t *myui.Theme) {
 				a.selectTab(a.nav)
 			})
 
-			myui.Column(c).Gap(2).Padding(8, 4, 0, 4).Children(func() {
-				myui.Text(c, "Native UI").FontSize(10.5).FontWeight(600).TextColor(t.TextMuted)
-				myui.Text(c, "Data stays on this device").FontSize(10.5).TextColor(t.TextMuted)
+			myui.Row(c).Gap(spaceS).AlignItems(myui.Center).Padding(8, 4, 0, 4).Children(func() {
+				myui.Column(c).Gap(2).Grow(1).MinWidth(0).Children(func() {
+					myui.Text(c, "Native UI").FontSize(10.5).FontWeight(600).TextColor(t.TextMuted)
+					myui.Text(c, "Data stays on this device").FontSize(10.5).TextColor(t.TextMuted)
+				})
+				a.themeToggle(c)
 			})
 		})
+}
+
+// themeToggle is the icon-only appearance switch at the foot of the rail: a
+// moon invites dark mode, a sun light mode. It overrides the system's
+// appearance from the first click on.
+func (a *App) themeToggle(c *myui.Context) {
+	tip := "Switch to dark mode"
+	if a.darkMode(c.Theme().Dark) {
+		tip = "Switch to light mode"
+	}
+	btn := myui.Button(c, "").
+		Key("theme-toggle").
+		Size(28, 28).
+		Padding(0).
+		Radius(8).
+		Tooltip(tip).
+		Label(tip).
+		Children(func() {
+			myui.Column(c).Fill().Center().Children(func() {
+				if a.darkMode(c.Theme().Dark) {
+					myui.Icon(c, sunIcon).Size(16, 16)
+				} else {
+					myui.Icon(c, moonIcon).Size(16, 16)
+				}
+			})
+		})
+	if btn.Clicked() {
+		a.darkSet = true
+		a.dark = !a.dark
+	}
 }
 
 func (a *App) selectTab(label string) {
