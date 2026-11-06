@@ -373,12 +373,6 @@ func (a *App) scanResults(c *myui.Context, snap scanSnapshot) {
 			snap.alive, snap.documented, snap.noAnswer,
 		), nil)
 
-		myui.Row(c).Gap(spaceS).Children(func() {
-			statTile(c, "alive", fmt.Sprintf("%d", snap.alive), t.Success)
-			statTile(c, "documented but silent", fmt.Sprintf("%d", snap.documented), t.Warning)
-			statTile(c, "no answer", fmt.Sprintf("%d", snap.noAnswer), t.TextMuted)
-		})
-
 		a.scanProgress(c, snap)
 		if left := snap.total - snap.done; left > 0 && !snap.running {
 			alert(c, fmt.Sprintf("%d not scanned", left), t.Warning)
@@ -417,9 +411,9 @@ func (a *App) scanGrid(c *myui.Context, snap scanSnapshot) {
 	t := c.Theme()
 	visible := 0
 	myui.Scroll(c).Grow(1).MinHeight(120).Children(func() {
-		// Fewer, roomier columns than the IPAM grid, so an address and its
-		// ports stay readable while the user looks through the results.
-		myui.Grid(c).Columns(columnsFor(c, 230, 5)).Gap(spaceS).Children(func() {
+		// Many narrow columns: the point of the grid is to survey every
+		// address on screen at once.
+		myui.Grid(c).Columns(columnsFor(c, 160, 8)).Gap(spaceS).Children(func() {
 			for _, host := range snap.hosts {
 				if !scanMatches(host, a.scan.filter, a.scan.search) {
 					continue
@@ -428,11 +422,11 @@ func (a *App) scanGrid(c *myui.Context, snap scanSnapshot) {
 				host := host
 				color := scanColor(t, host.State)
 				tile(c, host.Addr.String(), func() {
-					myui.Row(c).Gap(7).AlignItems(myui.Center).Children(func() {
+					myui.Row(c).Gap(6).AlignItems(myui.Center).Children(func() {
 						dot(c, color)
-						myui.Text(c, host.Addr.String()).FontSize(13).FontWeight(650).TextColor(color)
+						myui.Text(c, host.Addr.String()).FontSize(12.5).FontWeight(600).TextColor(color)
 					})
-					myui.Text(c, scanDetail(host)).FontSize(11.5).SingleLine().TextColor(t.TextMuted)
+					myui.Text(c, scanDetail(host)).FontSize(10.5).SingleLine().TextColor(t.TextMuted)
 				})
 			}
 		})
