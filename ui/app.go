@@ -337,7 +337,6 @@ func (a *App) selectTab(label string) {
 func (a *App) pageHeader(c *myui.Context, t *myui.Theme) {
 	s := sections[a.tab]
 	myui.Column(c).Gap(3).Children(func() {
-		eyebrow(c, "IPATLAS WORKSPACE")
 		myui.Text(c, s.title).FontSize(25).FontWeight(650)
 		myui.Text(c, s.blurb).FontSize(13).TextColor(t.TextMuted).MaxWidth(720)
 	})
