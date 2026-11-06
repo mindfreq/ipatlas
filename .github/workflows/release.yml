@@ -13,6 +13,7 @@ jobs:
     outputs:
       version: ${{ steps.ver.outputs.version }}
       tag: ${{ steps.ver.outputs.tag }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -86,9 +87,10 @@ jobs:
           name: IPAtlas ${{ needs.version.outputs.version }}
           draft: false
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
             build/**/*.deb
             build/**/*.tar.gz
-            build/**/*.exe
+            build/**/*-setup-*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
