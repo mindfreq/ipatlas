@@ -48,6 +48,9 @@ type Options struct {
 	// ARPTablePath overrides the OS ARP table file, for tests. Empty means
 	// the platform's table.
 	ARPTablePath string
+	// arpRead replaces the ARP table loader, for tests. Empty means
+	// readARPTable.
+	arpRead func(path string) map[netip.Addr]string
 }
 
 type config struct {
@@ -56,6 +59,7 @@ type config struct {
 	timeout time.Duration
 	icmp    bool
 	arpPath string
+	readARP func(path string) map[netip.Addr]string
 }
 
 func (o Options) config() config {
@@ -64,6 +68,10 @@ func (o Options) config() config {
 		timeout: o.Timeout,
 		icmp:    o.ICMP,
 		arpPath: o.ARPTablePath,
+		readARP: o.arpRead,
+	}
+	if cfg.readARP == nil {
+		cfg.readARP = readARPTable
 	}
 	if len(o.Ports) == 0 {
 		cfg.ports = append([]int(nil), DefaultPorts...)
@@ -103,7 +111,6 @@ type Result struct {
 // early.
 func Scan(ctx context.Context, targets []netip.Addr, opts Options) <-chan Result {
 	cfg := opts.config()
-	arp := readARPTable(cfg.arpPath)
 
 	out := make(chan Result)
 	jobs := make(chan netip.Addr)
@@ -114,7 +121,7 @@ func Scan(ctx context.Context, targets []netip.Addr, opts Options) <-chan Result
 		go func() {
 			defer wg.Done()
 			for addr := range jobs {
-				result := probe(ctx, addr, cfg, arp)
+				result := probe(ctx, addr, cfg)
 				select {
 				case out <- result:
 				case <-ctx.Done():
@@ -154,19 +161,26 @@ func Scan(ctx context.Context, targets []netip.Addr, opts Options) <-chan Result
 // Probe scans one address synchronously.
 func Probe(ctx context.Context, addr netip.Addr, opts Options) Result {
 	cfg := opts.config()
-	return probe(ctx, addr, cfg, readARPTable(cfg.arpPath))
+	return probe(ctx, addr, cfg)
 }
 
-func probe(ctx context.Context, addr netip.Addr, cfg config, arp map[netip.Addr]string) Result {
-	result := Result{Address: addr, MAC: arp[addr]}
+func probe(ctx context.Context, addr netip.Addr, cfg config) Result {
+	var result Result
+	result.Address = addr
 
 	for _, port := range cfg.ports {
 		if ctx.Err() != nil {
 			return result
 		}
-		if tcpOpen(ctx, addr, port, cfg.timeout) {
+		open, refused := tcpOpen(ctx, addr, port, cfg.timeout)
+		switch {
+		case open:
 			result.Alive = true
 			result.OpenPorts = append(result.OpenPorts, port)
+		case refused:
+			// A refusal (RST) means the host answered but the port is
+			// closed, so the host is alive without an open port.
+			result.Alive = true
 		}
 	}
 	sort.Ints(result.OpenPorts)
@@ -176,17 +190,26 @@ func probe(ctx context.Context, addr netip.Addr, cfg config, arp map[netip.Addr]
 			result.Alive = true
 		}
 	}
+
+	// The probes populate the OS ARP cache, so the table is read per host
+	// right after its port loop to catch addresses the probes just resolved.
+	if ctx.Err() == nil {
+		if mac := cfg.readARP(cfg.arpPath)[addr]; mac != "" {
+			result.MAC = mac
+			result.Alive = true
+		}
+	}
 	return result
 }
 
-func tcpOpen(ctx context.Context, addr netip.Addr, port int, timeout time.Duration) bool {
+func tcpOpen(ctx context.Context, addr netip.Addr, port int, timeout time.Duration) (open, refused bool) {
 	dialer := net.Dialer{Timeout: timeout}
 	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(addr.String(), strconv.Itoa(port)))
 	if err != nil {
-		return false
+		return false, dialRefused(err)
 	}
 	_ = conn.Close()
-	return true
+	return true, false
 }
 
 // icmpAlive runs the system ping command. It returns false on any error,

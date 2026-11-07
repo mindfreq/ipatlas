@@ -43,6 +43,13 @@ JavaScript. No data collection.
   addresses from the OS ARP table. Addresses already documented in IPAM are
   shown as **documented but silent** when they do not answer.
 
+
+## Download
+
+Prebuilt binaries for Linux and Windows are on the
+[Releases page](https://github.com/mindfreq/ipatlas/releases). No installer or
+runtime is needed. To build from source, see [Build and run](#build-and-run).
+
 ## Requirements
 
 - Go 1.27 or newer (the module uses Go 1.27).
@@ -101,9 +108,31 @@ requires root, a real network or ICMP permission.
 ## Scanner notes
 
 - A scan is capped at 4096 usable addresses per run.
+- A host is reported **alive** when any of these is true:
+  - a probed TCP port accepts the connection (listed as open);
+  - a probed TCP port refuses the connection (RST): the host answered, so it
+    is alive with no open ports;
+  - ICMP is enabled and the host answers `ping`;
+  - the OS ARP table has a valid entry for the address after its probes.
 - ICMP is optional and implemented by running the system `ping`; when the
   binary is missing or not permitted, the scan silently continues with TCP
   results.
 - MAC addresses are read only from the operating system's ARP table
-  (`/proc/net/arp` on Linux). The scanner never sends raw ARP packets.
+  (`/proc/net/arp` on Linux), once per host after its port probes, so the
+  entries the probes themselves create are visible. The scanner never sends
+  raw ARP packets.
 - Only scan networks you are responsible for.
+
+### Limitations
+
+- Only five TCP ports are probed (80, 443, 22, 445, 3389). A host that
+  filters all of them, does not answer ICMP and has no ARP entry is reported
+  as not answering.
+- Best results come from scanning your own local subnet. On routed networks,
+  a firewall or proxy that answers with RST on behalf of every address can
+  make unused addresses look alive.
+- A host that just left the network may still show as alive for a few seconds
+  while its ARP entry expires.
+- MAC addresses and ARP-based detection are available on Linux only. On
+  Windows and macOS the scanner relies on TCP (and optional ICMP) results.
+- The IPAM stores IPv4 networks only.

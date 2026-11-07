@@ -108,7 +108,9 @@ func TestScanStateAliveAndSilent(t *testing.T) {
 	}
 
 	closed := closedPort(t)
-	s = scanState{cidr: "127.0.0.1/32", ports: []int{closed}, timeout: 300 * time.Millisecond}
+	// A closed loopback port now counts as refused and therefore alive, so
+	// the silent and no-answer paths use an address that never answers.
+	s = scanState{cidr: "10.255.255.1/32", ports: []int{closed}, timeout: 300 * time.Millisecond}
 	s.start(func(netip.Addr) (string, bool) { return "Printer", true }, nil)
 	snap = waitScan(t, &s)
 	if snap.documented != 1 || snap.hosts[0].State != hostDocumentedSilent {
@@ -118,7 +120,7 @@ func TestScanStateAliveAndSilent(t *testing.T) {
 		t.Errorf("label = %q, want Printer", snap.hosts[0].Label)
 	}
 
-	s = scanState{cidr: "127.0.0.1/32", ports: []int{closed}, timeout: 300 * time.Millisecond}
+	s = scanState{cidr: "10.255.255.1/32", ports: []int{closed}, timeout: 300 * time.Millisecond}
 	s.start(nil, nil)
 	snap = waitScan(t, &s)
 	if snap.noAnswer != 1 || snap.hosts[0].State != hostNoAnswer {
@@ -138,7 +140,7 @@ func TestScanStateStop(t *testing.T) {
 		return "", false
 	}
 
-	s := scanState{cidr: "127.0.0.0/24", ports: []int{closedPort(t)}, timeout: 3 * time.Second}
+	s := scanState{cidr: "10.255.255.0/24", ports: []int{closedPort(t)}, timeout: 3 * time.Second}
 	s.start(docs, nil)
 
 	select {
@@ -227,7 +229,9 @@ func TestScanViewSlash24StaysResponsive(t *testing.T) {
 	if err := tt.Click("Scan target"); err != nil {
 		t.Fatal(err)
 	}
-	tt.Type("127.0.0.0/24")
+	// Otherwise every loopback refusal counts as alive, so the type-in
+	// target is an unroutable private address that never answers.
+	tt.Type("10.255.255.0/24")
 	if err := tt.Click("Start scan"); err != nil {
 		t.Fatal(err)
 	}
@@ -249,16 +253,18 @@ func TestScanViewSlash24StaysResponsive(t *testing.T) {
 
 func TestScanDocumentsIPAMAddresses(t *testing.T) {
 	store, _ := openIPAM(t)
-	network, err := store.SaveNetwork("127.0.0.0/24", "Loopback")
+	// A closed loopback port now counts as refused and therefore alive, so
+	// the documented-silent path uses an address that never answers.
+	network, err := store.SaveNetwork("10.255.255.0/24", "Unrouted")
 	if err != nil {
 		t.Fatalf("SaveNetwork: %v", err)
 	}
-	if err := store.Assign(network.ID, netip.MustParseAddr("127.0.0.1"), "Printer", "Office"); err != nil {
+	if err := store.Assign(network.ID, netip.MustParseAddr("10.255.255.1"), "Printer", "Office"); err != nil {
 		t.Fatalf("Assign: %v", err)
 	}
 
 	a := NewWithStore(store)
-	a.scan.cidr = "127.0.0.1/32"
+	a.scan.cidr = "10.255.255.1/32"
 	a.scan.ports = []int{closedPort(t)}
 	a.scan.timeout = 300 * time.Millisecond
 	a.StartScan(nil)

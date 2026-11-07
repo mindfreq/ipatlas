@@ -504,7 +504,7 @@ func scanDetail(host scanHost) string {
 			}
 			return strings.Join(parts, ", ")
 		}
-		return "alive"
+		return "alive, no open ports"
 	case hostDocumentedSilent:
 		if host.Label != "" {
 			return host.Label + " (silent)"
