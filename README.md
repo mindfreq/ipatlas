@@ -46,9 +46,7 @@ JavaScript. No data collection.
 
 ## Download
 
-Prebuilt binaries for Linux and Windows are on the
-[Releases page](https://github.com/mindfreq/ipatlas/releases). No installer or
-runtime is needed. To build from source, see [Build and run](#build-and-run).
+Prebuilt packages for Windows and Linux are on the [Releases page](https://github.com/mindfreq/ipatlas/releases).
 
 ## Requirements
 
