@@ -97,7 +97,6 @@ requires root, a real network or ICMP permission.
 | `internal/netcalc` | IPv4 subnet math, VLSM allocation, IPv6 parsing/splitting |
 | `internal/ipam` | SQLite schema, migrations, networks and assignments |
 | `internal/scanner` | Bounded TCP scan, optional ICMP, ARP-table parsing |
-| `resources/` | App icon |
 
 ## Scanner notes
 
