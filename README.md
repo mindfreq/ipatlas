@@ -52,7 +52,7 @@ Prebuilt packages for Windows and Linux are on the [Releases page](https://githu
 
 - Go 1.27 or newer (the module uses Go 1.27).
 - The platform requirements of MyGo 0.7.4 for native UI (a graphical session on
-  Linux). `go tool mygo doctor` reports missing pieces.
+  Linux). See [MyGo](https://github.com/egoist/mygo)
 - No cgo and no Node.js or web toolchain.
 
 ## Build and run
