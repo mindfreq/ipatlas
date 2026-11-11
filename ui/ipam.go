@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo"
@@ -24,6 +25,28 @@ const (
 	ipamCompactHeight = 720
 	ipamNarrowWidth   = 1000
 )
+
+// pencilIcon is the small edit affordance beside the network name; parsed
+// once, never in a frame.
+var pencilIcon = myui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5Z"/><path d="m15 5 4 4"/></svg>`))
+
+// trashIcon is the delete affordance beside it.
+var trashIcon = myui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6M14 11v6"/></svg>`))
+
+// saveIcon is the assignment's save affordance beside the edit fields.
+var saveIcon = myui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>`))
+
+// chevronLeftIcon and chevronRightIcon page the address grid back and forth.
+var chevronLeftIcon = myui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`))
+var chevronRightIcon = myui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>`))
+
+// searchIcon runs the search box beside it.
+var searchIcon = myui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>`))
+
+// expandIcon gives the address grid the page's full width, and restoreIcon
+// brings the networks list back.
+var expandIcon = myui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/></svg>`))
+var restoreIcon = myui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="m14 10 7-7"/><path d="m3 21 7-7"/></svg>`))
 
 type ipamState struct {
 	store    *ipam.Store
@@ -62,6 +85,10 @@ type ipamState struct {
 	results      []ipam.AddressEntry
 	matches      uint64
 	searchMsg    string
+
+	// pageInput is the page number typed in the pager's box; it follows
+	// the page the grid shows until the user edits it.
+	pageInput string
 
 	// reveal asks the grid to scroll the selected address into view once.
 	reveal bool
@@ -179,9 +206,11 @@ func (s *ipamState) applyPage(p pageResult) {
 		s.results = p.results
 		s.matches = p.matches
 		s.searchOffset = p.searchOffset
+		s.pageInput = fmt.Sprintf("%d", p.searchOffset/ipamPageSize+1)
 	} else {
 		s.entries = p.entries
 		s.offset = p.offset
+		s.pageInput = fmt.Sprintf("%d", p.offset/ipamPageSize+1)
 	}
 }
 
@@ -336,6 +365,22 @@ func (s *ipamState) setOffset(v uint64) {
 	s.loadPage()
 }
 
+// jumpToPage goes to the page typed in the pager's box, clamped to the
+// pages there are.
+func (s *ipamState) jumpToPage() {
+	n, err := strconv.Atoi(strings.TrimSpace(s.pageInput))
+	if err != nil {
+		return
+	}
+	_, total := s.pager()
+	pages := int(pageCount(total))
+	if pages == 0 {
+		return
+	}
+	n = min(max(n, 1), pages)
+	s.setOffset(uint64(n-1) * ipamPageSize)
+}
+
 func (s *ipamState) nextPage() {
 	offset, total := s.pager()
 	next := offset + ipamPageSize
@@ -355,28 +400,6 @@ func (s *ipamState) previousPage() {
 	} else {
 		s.setOffset(0)
 	}
-}
-
-// pageLabel is the text between the page buttons.
-func (s *ipamState) pageLabel(narrow bool) string {
-	offset, total := s.pager()
-	page := offset/ipamPageSize + 1
-	pages := pageCount(total)
-	if s.searching {
-		switch {
-		case total == 0:
-			return "No matches"
-		case narrow:
-			return fmt.Sprintf("%d found · %d/%d", total, page, pages)
-		default:
-			return fmt.Sprintf("%d matches · page %d of %d", total, page, pages)
-		}
-	}
-	if narrow {
-		return fmt.Sprintf("%d / %d", page, pages)
-	}
-	return fmt.Sprintf("Page %d of %d · %d-%d of %d",
-		page, pages, offset+1, offset+uint64(len(s.entries)), total)
 }
 
 // networksCollapsed reports whether the "Saved networks" list is folded: the
@@ -885,26 +908,42 @@ func (a *App) ipamNetwork(c *myui.Context, n *ipam.Network, l ipamLayout) {
 	s := &a.ipam
 	t := c.Theme()
 	myui.Column(c).Grow(1).Gap(l.gap).Children(func() {
-		cardHeader(c, n.Name, fmt.Sprintf("%s  ·  %d used, %d free of %d",
+		// The counts sit under the name again; the search group takes
+		// their old place at the far end, level with the name and icons.
+		cardHeaderStart(c, n.Name, fmt.Sprintf("%s  ·  %d used, %d free of %d",
 			n.CIDR, s.stats.Used, s.stats.Free, s.stats.Total), func() {
-			// The counts are already in the subtitle; the pills only earn
-			// their space on wide windows.
-			if !l.narrow {
-				pill(c, fmt.Sprintf("%d used", s.stats.Used), t.Accent)
-				pill(c, fmt.Sprintf("%d free", s.stats.Free), t.Success)
-			}
-
-			if s.addressesFocus {
-				myui.PrimaryButton(c, "Restore view").OnClick(func() {
-					s.addressesFocus = false
-				})
-				return
-			}
-			myui.Button(c, "Expand addresses").OnClick(func() {
-				s.addressesFocus = true
+			// The search box, its magnifier and the next-free shortcut,
+			// all standing down while a load is in flight.
+			search := myui.TextInput(c, &s.searchInput).
+				Placeholder("Search IP, label or owner").
+				Width(260)
+			search.OnSubmit(s.submitSearch)
+			myui.Row(c).Key("search-wrap").Padding(5, 0, 0, 0).Children(func() {
+				iconButton(c, "search", "Search", searchIcon, t.Text, s.busy, s.submitSearch)
 			})
-			myui.Button(c, "Rename network").OnClick(s.beginRename)
-			myui.Button(c, "Delete network").TextColor(t.Danger).OnClick(s.beginDelete)
+			if s.searching || s.searchInput != "" {
+				myui.Button(c, "Clear").Key("clear").OnClick(s.clearSearch)
+			}
+			nextFreeButton := myui.Button(c, "Next free").Key("next-free").Tooltip("Select the next free address").OnClick(s.nextFree)
+			nextFreeButton.Disabled(s.busy)
+
+			// Last in the group, so it sits at the far right.
+			myui.Row(c).Key("expand-wrap").Padding(5, 0, 0, 0).Children(func() {
+				if s.addressesFocus {
+					iconButtonPrimary(c, "restore-view", "Restore view", restoreIcon, func() {
+						s.addressesFocus = false
+					})
+				} else {
+					iconButton(c, "expand-addresses", "Expand addresses", expandIcon, t.Text, false, func() {
+						s.addressesFocus = true
+					})
+				}
+			})
+		}, func() {
+			// The pencil beside the network name opens the rename editor,
+			// and the trash next to it asks before deleting the network.
+			iconButton(c, "rename-network", "Rename network", pencilIcon, t.Text, false, s.beginRename)
+			iconButton(c, "delete-network", "Delete network", trashIcon, t.Danger, false, s.beginDelete)
 		})
 
 		if s.renaming && !s.addressesFocus {
@@ -925,45 +964,38 @@ func (a *App) ipamNetwork(c *myui.Context, n *ipam.Network, l ipamLayout) {
 			})
 		}
 
-		a.ipamToolbar(c, l)
+		a.ipamToolbar(c)
 		a.ipamEditor(c)
 		a.ipamGrid(c)
 	})
 }
 
-// ipamToolbar holds the search box and the page controls in one row that
-// wraps to a second line only when the window is too narrow for it.
-func (a *App) ipamToolbar(c *myui.Context, l ipamLayout) {
+// ipamToolbar holds the page controls below the search group in the
+// network's header.
+func (a *App) ipamToolbar(c *myui.Context) {
 	s := &a.ipam
 	t := c.Theme()
 	myui.Column(c).Gap(spaceS).Children(func() {
-		myui.Row(c).Gap(spaceS).AlignItems(myui.Center).Wrap().Children(func() {
-			search := myui.TextInput(c, &s.searchInput).
-				Label("Search").
-				Placeholder("Search IP, label or owner").
-				Grow(1).
-				MinWidth(180)
-			search.OnSubmit(s.submitSearch)
-
-			// While a load is in flight the buttons stand down; the load
-			// applies when it lands and supersedes clicks meanwhile.
-			searchButton := myui.PrimaryButton(c, "Search").Key("search").OnClick(s.submitSearch)
-			searchButton.Disabled(s.busy)
-			if s.searching || s.searchInput != "" {
-				myui.Button(c, "Clear").Key("clear").OnClick(s.clearSearch)
-			}
-			nextFreeButton := myui.Button(c, "Next free").Key("next-free").Tooltip("Select the next free address").OnClick(s.nextFree)
-			nextFreeButton.Disabled(s.busy)
-
-			offset, total := s.pager()
-			myui.Row(c).Key("pager").Gap(spaceS).AlignItems(myui.Center).Children(func() {
-				previous := myui.Button(c, "Prev").Key("prev").OnClick(s.previousPage)
-				previous.Disabled(offset == 0 || s.busy)
-				myui.Text(c, s.pageLabel(l.narrow)).FontSize(12).TextColor(t.TextMuted)
-				next := myui.Button(c, "Next").Key("next").OnClick(s.nextPage)
-				next.Disabled(offset+ipamPageSize >= total || s.busy)
+		offset, total := s.pager()
+		if pageCount(total) > 1 {
+			// The arrows show only for a range that actually pages,
+			// with a small box to type a page and jump straight to it.
+			// The section grows over its line's leftover and hugs the
+			// end, a little padding keeping it off the row's edge.
+			myui.Row(c).Key("pager").Gap(spaceS).AlignItems(myui.Center).
+				Grow(1).Justify(myui.End).Padding(0, 8, 0, 0).Children(func() {
+				iconButton(c, "prev", "Prev", chevronLeftIcon, t.Text, offset == 0 || s.busy, s.previousPage)
+				c.Key("page-jump")
+				page := myui.TextInput(c, &s.pageInput).
+					Label("Page").
+					Placeholder("1").
+					Width(64)
+				page.OnSubmit(s.jumpToPage)
+				myui.Text(c, fmt.Sprintf("/ %d", pageCount(total))).
+					FontSize(12).TextColor(t.TextMuted)
+				iconButton(c, "next", "Next", chevronRightIcon, t.Text, offset+ipamPageSize >= total || s.busy, s.nextPage)
 			})
-		})
+		}
 		if s.searchMsg != "" {
 			alert(c, s.searchMsg, t.Warning)
 		}
@@ -982,27 +1014,28 @@ func (a *App) ipamEditor(c *myui.Context) {
 			})
 			return
 		}
-		myui.Row(c).Gap(spaceS).AlignItems(myui.Center).Wrap().Children(func() {
-			myui.Text(c, "Edit "+s.editAddr.String()).FontSize(13).FontWeight(650)
-			pill(c, "assignment", t.Accent)
-		})
+		// The title carries the two fields and their icon actions: save
+		// keeps the assignment, the trash removes it.
 		myui.Row(c).Key(s.editAddr.String()).Gap(spaceS).AlignItems(myui.Center).Wrap().Children(func() {
+			myui.Text(c, "Edit "+s.editAddr.String()).FontSize(13).FontWeight(650)
 			myui.TextInput(c, &s.editLabel).
 				Label("Label").
 				Placeholder("Printer, gateway...").
 				Grow(1).
-				MinWidth(150)
+				MinWidth(120)
 			myui.TextInput(c, &s.editOwner).
 				Label("Owner").
 				Placeholder("Team or person").
 				Grow(1).
-				MinWidth(150)
-			myui.PrimaryButton(c, "Save assignment").OnClick(s.assign)
-			myui.Button(c, "Remove assignment").OnClick(s.unassign)
-			if s.searching {
-				myui.Button(c, "Show in range").Key("locate").OnClick(s.locateEdit)
-			}
+				MinWidth(120)
+			iconButtonPrimary(c, "save-assignment", "Save assignment", saveIcon, s.assign)
+			iconButton(c, "remove-assignment", "Remove assignment", trashIcon, t.Danger, false, s.unassign)
 		})
+		if s.searching {
+			myui.Row(c).Gap(spaceS).AlignItems(myui.Center).Children(func() {
+				myui.Button(c, "Show in range").Key("locate").OnClick(s.locateEdit)
+			})
+		}
 		if s.editErr != "" {
 			alert(c, s.editErr, t.Danger)
 		}

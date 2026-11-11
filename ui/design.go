@@ -138,18 +138,40 @@ func card(c *myui.Context, fn func()) myui.Element {
 // cardHeader lays out one card title: a title with an optional description on
 // the left and actions (pills, buttons) right-aligned on the same row. Every
 // card header goes through this so titles, sizes and spacing stay identical.
-func cardHeader(c *myui.Context, title, description string, actions func()) {
+// The variadic titleAfter entries, when given, sit right after the title
+// text on its row, as a small edit icon beside the name does.
+func cardHeader(c *myui.Context, title, description string, actions func(), titleAfter ...func()) {
+	cardHeaderLayout(c, title, description, actions, myui.Center, titleAfter...)
+}
+
+// cardHeaderStart is cardHeader with everything top-aligned: the actions
+// keep their place at the far end, level with the title's row even when
+// they carry a taller control, as the search box in the IPAM header does.
+func cardHeaderStart(c *myui.Context, title, description string, actions func(), titleAfter ...func()) {
+	cardHeaderLayout(c, title, description, actions, myui.Start, titleAfter...)
+}
+
+// cardHeaderLayout builds the header row at the given cross alignment,
+// which the actions wrapper takes as well.
+func cardHeaderLayout(c *myui.Context, title, description string, actions func(), align myui.Align, titleAfter ...func()) {
 	t := c.Theme()
-	myui.Row(c).Gap(spaceM).AlignItems(myui.Center).Wrap().Children(func() {
+	myui.Row(c).Gap(spaceM).AlignItems(align).Wrap().Children(func() {
 		myui.Column(c).Gap(2).Children(func() {
-			myui.Text(c, title).FontSize(15).FontWeight(650)
+			myui.Row(c).Gap(6).AlignItems(myui.Center).Children(func() {
+				myui.Text(c, title).FontSize(15).FontWeight(650)
+				for _, fn := range titleAfter {
+					if fn != nil {
+						fn()
+					}
+				}
+			})
 			if description != "" {
 				myui.Text(c, description).FontSize(12).TextColor(t.TextMuted)
 			}
 		})
 		if actions != nil {
 			myui.Spacer(c)
-			actions()
+			myui.Row(c).Gap(spaceM).AlignItems(align).Children(actions)
 		}
 	})
 }
@@ -162,6 +184,61 @@ func eyebrow(c *myui.Context, text string) {
 		FontWeight(700).
 		LetterSpacing(1.3).
 		TextColor(t.TextMuted)
+}
+
+// headerIconSize is the square the header's icon buttons (pencil, trash)
+// take.
+const headerIconSize = 26
+
+// iconButton is a small icon-only button, as the pencil and trash beside the
+// IPAM network name are: a quiet square without a background or border that
+// shows its color and a hover tint, and takes the tooltip and label given.
+// It stands down while disabled is set.
+func iconButton(c *myui.Context, key, tip string, icon *myui.SVG, color myui.Color, disabled bool, onClick func()) {
+	b := myui.ButtonBase(c).
+		Key(key).
+		Size(headerIconSize, headerIconSize).
+		Padding(0).
+		Radius(8).
+		Tooltip(tip).
+		Label(tip).
+		TextColor(color).
+		Disabled(disabled).
+		Children(func() {
+			myui.Column(c).Fill().Center().Children(func() {
+				myui.Icon(c, icon).Size(14, 14)
+			})
+		})
+	if !disabled && b.Hovered() {
+		b.Background(c.Theme().SurfaceHover)
+	}
+	b.OnClick(onClick)
+}
+
+// iconButtonPrimary is iconButton as the primary action: an accent-tinted
+// chip, the app's pill treatment, with the accent's own icon color. It
+// stands out among the quiet icon buttons without going as heavy as a
+// solid PrimaryButton at this small size.
+func iconButtonPrimary(c *myui.Context, key, tip string, icon *myui.SVG, onClick func()) {
+	t := c.Theme()
+	b := myui.ButtonBase(c).
+		Key(key).
+		Size(headerIconSize, headerIconSize).
+		Padding(0).
+		Radius(8).
+		Tooltip(tip).
+		Label(tip).
+		TextColor(t.Accent).
+		Background(t.Accent.Alpha(0.15)).
+		Children(func() {
+			myui.Column(c).Fill().Center().Children(func() {
+				myui.Icon(c, icon).Size(14, 14)
+			})
+		})
+	if b.Hovered() {
+		b.Background(t.Accent.Alpha(0.28))
+	}
+	b.OnClick(onClick)
 }
 
 // pill is a compact status or metadata token.

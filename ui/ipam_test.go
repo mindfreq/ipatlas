@@ -274,6 +274,10 @@ func TestIPAMSelectAndDelete(t *testing.T) {
 	if !tt.HasText("10.0.0.1") {
 		t.Errorf("texts %q do not show the first network's grid", tt.Texts())
 	}
+	// A /24 fits one page, so the page arrows stay hidden for it.
+	if _, ok := tt.Find("Prev"); ok {
+		t.Error("the page arrows show for a one-page network")
+	}
 
 	// Deleting asks for confirmation first and does not remove anything yet.
 	if err := tt.Click("Delete network"); err != nil {
@@ -329,8 +333,8 @@ func TestIPAMPaging(t *testing.T) {
 	if err := tt.Click("IPAM"); err != nil {
 		t.Fatal(err)
 	}
-	if !tt.HasText("Page 1 of 2 · 1-256 of 510") {
-		t.Fatalf("texts %q do not show page 1", tt.Texts())
+	if _, ok := tt.Find("Prev"); !ok {
+		t.Fatalf("texts %q do not show the page arrows", tt.Texts())
 	}
 
 	if err := tt.Click("Next"); err != nil {
@@ -339,15 +343,29 @@ func TestIPAMPaging(t *testing.T) {
 	if a.ipam.offset != ipamPageSize {
 		t.Errorf("offset after Next = %d, want %d", a.ipam.offset, ipamPageSize)
 	}
-	if !tt.HasText("Page 2 of 2 · 257-510 of 510") {
-		t.Errorf("texts %q do not show page 2", tt.Texts())
-	}
 
 	if err := tt.Click("Prev"); err != nil {
 		t.Fatal(err)
 	}
 	if a.ipam.offset != 0 {
 		t.Errorf("offset after Previous = %d, want 0", a.ipam.offset)
+	}
+
+	// Typing a page number in the pager's box jumps straight to it.
+	if err := tt.Click("Page"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("2")
+	tt.Key(0, myui.KeyEnter)
+	tt.Frame()
+	if a.ipam.offset != ipamPageSize {
+		t.Errorf("offset after a page jump = %d, want %d", a.ipam.offset, ipamPageSize)
+	}
+	tt.Type("9")
+	tt.Key(0, myui.KeyEnter)
+	tt.Frame()
+	if a.ipam.offset != ipamPageSize {
+		t.Errorf("offset after a past-the-end page jump = %d, want the last page %d", a.ipam.offset, ipamPageSize)
 	}
 }
 
