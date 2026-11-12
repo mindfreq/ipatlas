@@ -72,6 +72,9 @@ type AddressEntry struct {
 	State  AddressState
 	Label  string
 	Owner  string
+	// UpdatedAt is when the assignment was last saved, zero for a free
+	// address.
+	UpdatedAt time.Time
 }
 
 // Assignment is one labelled address.
@@ -495,11 +498,12 @@ func (s *Store) Addresses(networkID int64, offset uint64, limit int) ([]AddressE
 	}
 
 	used := make(map[uint64]struct {
-		label string
-		owner string
+		label   string
+		owner   string
+		updated int64
 	}, count)
 	rows, err := s.db.Query(`
-		SELECT ip, label, owner FROM assignments
+		SELECT ip, label, owner, updated_at FROM assignments
 		WHERE network_id = ? AND ip BETWEEN ? AND ?`,
 		networkID, offset, offset+count-1,
 	)
@@ -508,18 +512,20 @@ func (s *Store) Addresses(networkID int64, offset uint64, limit int) ([]AddressE
 	}
 	for rows.Next() {
 		var (
-			ip    uint64
-			label string
-			owner string
+			ip      uint64
+			label   string
+			owner   string
+			updated int64
 		)
-		if err := rows.Scan(&ip, &label, &owner); err != nil {
+		if err := rows.Scan(&ip, &label, &owner, &updated); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("ipam: read assignment: %w", err)
 		}
 		used[ip] = struct {
-			label string
-			owner string
-		}{label, owner}
+			label   string
+			owner   string
+			updated int64
+		}{label, owner, updated}
 	}
 	if err := rows.Close(); err != nil {
 		return nil, fmt.Errorf("ipam: read assignments: %w", err)
@@ -540,6 +546,7 @@ func (s *Store) Addresses(networkID int64, offset uint64, limit int) ([]AddressE
 			entry.State = Used
 			entry.Label = a.label
 			entry.Owner = a.owner
+			entry.UpdatedAt = time.Unix(a.updated, 0)
 		}
 		entries = append(entries, entry)
 	}
@@ -638,7 +645,7 @@ func (s *Store) SearchAssignments(networkID int64, query string, offset uint64, 
 	}
 
 	rows, err := s.db.Query(
-		`SELECT ip, label, owner FROM assignments WHERE `+where+` ORDER BY ip LIMIT ? OFFSET ?`,
+		`SELECT ip, label, owner, updated_at FROM assignments WHERE `+where+` ORDER BY ip LIMIT ? OFFSET ?`,
 		networkID, pattern, pattern, pattern, limit, offset,
 	)
 	if err != nil {
@@ -648,20 +655,22 @@ func (s *Store) SearchAssignments(networkID int64, query string, offset uint64, 
 	entries := make([]AddressEntry, 0, limit)
 	for rows.Next() {
 		var (
-			ip    uint64
-			label string
-			owner string
+			ip      uint64
+			label   string
+			owner   string
+			updated int64
 		)
-		if err := rows.Scan(&ip, &label, &owner); err != nil {
+		if err := rows.Scan(&ip, &label, &owner, &updated); err != nil {
 			rows.Close()
 			return nil, 0, fmt.Errorf("ipam: read match: %w", err)
 		}
 		entries = append(entries, AddressEntry{
-			Addr:   addrFromUint32(first + uint32(ip)),
-			Offset: ip,
-			State:  Used,
-			Label:  label,
-			Owner:  owner,
+			Addr:      addrFromUint32(first + uint32(ip)),
+			Offset:    ip,
+			State:     Used,
+			Label:     label,
+			Owner:     owner,
+			UpdatedAt: time.Unix(updated, 0),
 		})
 	}
 	if err := rows.Close(); err != nil {

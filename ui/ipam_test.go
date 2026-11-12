@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"net/netip"
 	"path/filepath"
 	"strings"
@@ -434,6 +435,92 @@ func TestIPAMLiveSearch(t *testing.T) {
 	}
 	if !a.ipam.editAddr.IsValid() || a.ipam.editAddr.String() != "10.0.0.10" {
 		t.Errorf("editing after Enter = %v, want 10.0.0.10", a.ipam.editAddr)
+	}
+}
+
+func TestIPAMCSV(t *testing.T) {
+	store, _ := openIPAM(t)
+	n, err := store.SaveNetwork("10.0.0.0/24", "Lab")
+	if err != nil {
+		t.Fatalf("SaveNetwork: %v", err)
+	}
+	if err := store.Assign(n.ID, mustAddr("10.0.0.10"), "Printer", "Office"); err != nil {
+		t.Fatalf("Assign: %v", err)
+	}
+	if err := store.Assign(n.ID, mustAddr("10.0.0.1"), "Gateway", ""); err != nil {
+		t.Fatalf("Assign: %v", err)
+	}
+
+	var b bytes.Buffer
+	if err := ipamCSV(store, n, &b, true); err != nil {
+		t.Fatalf("ipamCSV(all hosts): %v", err)
+	}
+	csv := b.String()
+	if !strings.HasPrefix(csv, "\xef\xbb\xbf") {
+		t.Error("CSV is missing the UTF-8 BOM Excel expects")
+	}
+	want := []string{
+		"Address,State,Label,Owner,Updated",
+		"10.0.0.1,used,Gateway,,",
+		"10.0.0.2,,,,",
+		"10.0.0.10,used,Printer,Office,",
+		"10.0.0.254,,,,",
+	}
+	for _, row := range want {
+		if !strings.Contains(csv, row) {
+			t.Errorf("CSV = %q, want it to contain %q", csv, row)
+		}
+	}
+
+	// Every usable address of the range is in the sheet, free ones
+	// included, and nothing outside it.
+	if got := strings.Count(csv, "\n") - 1; got != 254 { // minus the header
+		t.Errorf("CSV has %d address rows, want all 254 usable hosts", got)
+	}
+
+	// The assignments sheet keeps only the assigned ones, without the
+	// State column.
+	b.Reset()
+	if err := ipamCSV(store, n, &b, false); err != nil {
+		t.Fatalf("ipamCSV(assignments): %v", err)
+	}
+	csv = b.String()
+	want = []string{
+		"Address,Label,Owner,Updated",
+		"10.0.0.1,Gateway,,",
+		"10.0.0.10,Printer,Office,",
+	}
+	for _, row := range want {
+		if !strings.Contains(csv, row) {
+			t.Errorf("CSV = %q, want it to contain %q", csv, row)
+		}
+	}
+	if got := strings.Count(csv, "\n") - 1; got != 2 { // minus the header
+		t.Errorf("CSV has %d rows, want only the 2 assignments", got)
+	}
+}
+
+func TestIPAMExportMenu(t *testing.T) {
+	store, _ := openIPAM(t)
+	if _, err := store.SaveNetwork("10.0.0.0/24", "Lab"); err != nil {
+		t.Fatalf("SaveNetwork: %v", err)
+	}
+
+	a := NewWithStore(store)
+	tt := myui.NewTester(a.View, 1100, 720)
+	if err := tt.Click("IPAM"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The export button opens a menu in the window with the two sheets.
+	if err := tt.Click("Export CSV"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	for _, item := range []string{"Export all hosts", "Export assignments"} {
+		if _, ok := tt.Find(item); !ok {
+			t.Errorf("texts %q do not show the menu item %q", tt.Texts(), item)
+		}
 	}
 }
 

@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"encoding/csv"
 	"errors"
 	"fmt"
+	"io"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	myui "github.com/egoist/mygo/ui"
 
 	"ipatlas/internal/ipam"
+	"ipatlas/internal/utils"
 )
 
 const ipamPageSize = 256
@@ -89,6 +92,10 @@ type ipamState struct {
 	results      []ipam.AddressEntry
 	matches      uint64
 	searchMsg    string
+
+	// The result of the last CSV export of the assignments.
+	exportMsg string
+	exportErr bool
 
 	// pageInput is the page number typed in the pager's box; it follows
 	// the page the grid shows until the user edits it.
@@ -319,6 +326,7 @@ func (s *ipamState) selectNetwork(id int64) {
 	s.clearEdit()
 	s.cancelRename()
 	s.confirmDelete = false
+	s.exportMsg, s.exportErr = "", false
 	s.loadPage()
 }
 
@@ -728,6 +736,57 @@ func (s *ipamState) unassign() {
 	})
 }
 
+// exportScope picks what the CSV of a network holds: only the assigned
+// addresses, or every usable host, free ones included.
+type exportScope uint8
+
+const (
+	// exportAssigned is the inventory sheet: one row per assignment.
+	exportAssigned exportScope = iota
+	// exportAllHosts is the full map: one row per usable address.
+	exportAllHosts
+)
+
+// exportCSV offers the current network as a CSV: the save dialog opens off
+// the UI thread and the rows are written there too, so a long range never
+// blocks a frame.
+func (s *ipamState) exportCSV(scope exportScope) {
+	if s.store == nil {
+		s.err = "The IPAM database is unavailable."
+		s.redraw()
+		return
+	}
+	n := s.current()
+	if n == nil {
+		return
+	}
+	store, network := s.store, *n
+	title, all := "Export assignments", false
+	if scope == exportAllHosts {
+		title, all = "Export hosts", true
+	}
+	utils.SaveCSV(title,
+		"ipam-"+strings.ReplaceAll(network.CIDR, "/", "-")+"-"+
+			time.Now().Format("2006-01-02_15-04-05")+".csv",
+		func(w io.Writer) error { return ipamCSV(store, network, w, all) },
+		func(err error, path string) {
+			if err != nil {
+				s.exportErr = true
+				s.exportMsg = "Could not export: " + err.Error()
+				s.redraw()
+				return
+			}
+			s.exportErr = false
+			if all {
+				s.exportMsg = "Exported all " + strconv.FormatUint(network.Subnet.Usable, 10) +
+					" hosts of " + network.Name + " to " + path + "."
+			} else {
+				s.exportMsg = "Exported the assignments of " + network.Name + " to " + path + "."
+			}
+			s.redraw()
+		})
+}
+
 func (s *ipamState) beginRename() {
 	n := s.current()
 	if n == nil {
@@ -991,6 +1050,19 @@ func (a *App) ipamNetwork(c *myui.Context, n *ipam.Network, l ipamLayout) {
 			}
 			nextFreeButton := myui.Button(c, "Next free").Key("next-free").Tooltip("Select the next free address").OnClick(s.nextFree)
 			nextFreeButton.Disabled(s.busy)
+			// The export button opens a menu drawn in the window: the
+			// full map of the network's hosts, or the inventory sheet
+			// of its assignments only. The key precedes construction,
+			// as a menu button is stateful.
+			c.Key("export-csv")
+			myui.PopoverMenuButton(c, "Export CSV", func(m *myui.Menu) {
+				if m.Item("Export all hosts").Chosen() {
+					s.exportCSV(exportAllHosts)
+				}
+				if m.Item("Export assignments").Chosen() {
+					s.exportCSV(exportAssigned)
+				}
+			}).Tooltip("Save the network's addresses as a CSV file")
 
 			// Last in the group, so it sits at the far right.
 			myui.Row(c).Key("expand-wrap").Padding(5, 0, 0, 0).Children(func() {
@@ -1063,6 +1135,13 @@ func (a *App) ipamToolbar(c *myui.Context) {
 		}
 		if s.searchMsg != "" {
 			alert(c, s.searchMsg, t.Warning)
+		}
+		if s.exportMsg != "" {
+			color := t.Success
+			if s.exportErr {
+				color = t.Danger
+			}
+			alert(c, s.exportMsg, color)
 		}
 	})
 }
@@ -1153,6 +1232,53 @@ func (a *App) ipamGrid(c *myui.Context) {
 		})
 	})
 	s.reveal = false
+}
+
+// ipamCSV streams a network to w as an Excel-compatible CSV document.
+// With all, it holds every usable address, the free ones left blank; without
+// it, only the assigned ones. It runs off the UI thread, so it only
+// touches what it is given, and writes page by page so a long range never
+// sits whole in memory.
+func ipamCSV(store *ipam.Store, network ipam.Network, w io.Writer, all bool) error {
+	if _, err := w.Write([]byte("\xef\xbb\xbf")); err != nil { // UTF-8 BOM so Excel detects the encoding
+		return err
+	}
+	cw := csv.NewWriter(w)
+	if all {
+		cw.Write([]string{"Address", "State", "Label", "Owner", "Updated"})
+	} else {
+		cw.Write([]string{"Address", "Label", "Owner", "Updated"})
+	}
+	for offset := uint64(0); offset < network.Subnet.Usable; {
+		entries, err := store.Addresses(network.ID, offset, ipam.MaxAddressPage)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if e.State != ipam.Used {
+				if !all {
+					continue
+				}
+				// A free address leaves State, Label, Owner and
+				// Updated empty: smaller and no less clear.
+				cw.Write([]string{e.Addr.String(), "", "", "", ""})
+				continue
+			}
+			updated := e.UpdatedAt.Format("2006-01-02 15:04")
+			if all {
+				cw.Write([]string{e.Addr.String(), "used", e.Label, e.Owner, updated})
+			} else {
+				cw.Write([]string{e.Addr.String(), e.Label, e.Owner, updated})
+			}
+		}
+		offset += uint64(len(entries))
+		if err := cw.Error(); err != nil {
+			return err
+		}
+		cw.Flush()
+	}
+	cw.Flush()
+	return cw.Error()
 }
 
 func addressLabel(entry ipam.AddressEntry) string {

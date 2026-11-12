@@ -5,16 +5,16 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
-	"os"
+	"io"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	mygo "github.com/egoist/mygo"
 	myui "github.com/egoist/mygo/ui"
 
 	"ipatlas/internal/netcalc"
+	"ipatlas/internal/utils"
 )
 
 type vlsmRow struct {
@@ -116,20 +116,13 @@ func (s *vlsmState) allocate() {
 // export opens a native save dialog off the UI thread and writes the
 // allocation table as CSV, which Excel opens directly.
 func (s *vlsmState) export(plan *netcalc.VLSMPlan, invalidate func()) {
-	go func() {
-		path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
-			Title:       "Export allocation",
-			DefaultPath: "vlsm-allocation-" + time.Now().Format("2006-01-02_15-04-05") + ".csv",
-			Filters:     []mygo.FileFilter{{Name: "CSV (Excel)", Extensions: []string{"csv"}}},
-		})
-		if path == "" {
-			return // dismissed or unavailable
-		}
-		if err == nil {
-			err = os.WriteFile(path, vlsmCSV(plan), 0o644)
-		}
-		s.setExportResult(err, path, invalidate)
-	}()
+	utils.SaveCSV("Export allocation",
+		"vlsm-allocation-"+time.Now().Format("2006-01-02_15-04-05")+".csv",
+		func(w io.Writer) error {
+			_, err := w.Write(vlsmCSV(plan))
+			return err
+		},
+		func(err error, path string) { s.setExportResult(err, path, invalidate) })
 }
 
 func (s *vlsmState) setExportResult(err error, path string, invalidate func()) {
