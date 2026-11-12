@@ -75,9 +75,7 @@ func (a *App) ipv4Result(c *myui.Context, r *netcalc.IPv4Subnet) {
 	s := &a.ipv4
 	t := c.Theme()
 	card(c, func() {
-		cardHeader(c, cidrString(*r), "Address plan", func() {
-			pill(c, "/"+strconv.Itoa(r.Prefix))
-		})
+		cardHeader(c, cidrString(*r), "Address plan", nil)
 
 		myui.Divider(c)
 
