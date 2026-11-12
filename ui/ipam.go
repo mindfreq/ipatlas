@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 	myui "github.com/egoist/mygo/ui"
@@ -14,6 +15,10 @@ import (
 )
 
 const ipamPageSize = 256
+
+// searchDebounce is the typing pause before the live search runs, so a
+// burst of keystrokes runs one database search, not one per character.
+const searchDebounce = 300 * time.Millisecond
 
 const (
 	// With more saved networks than this, the list scrolls inside a fixed
@@ -39,9 +44,6 @@ var saveIcon = myui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg"
 // chevronLeftIcon and chevronRightIcon page the address grid back and forth.
 var chevronLeftIcon = myui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`))
 var chevronRightIcon = myui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>`))
-
-// searchIcon runs the search box beside it.
-var searchIcon = myui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>`))
 
 // expandIcon gives the address grid the page's full width, and restoreIcon
 // brings the networks list back.
@@ -77,11 +79,13 @@ type ipamState struct {
 	addressesFocus bool // only the address grid and its controls are shown
 
 	// Search. While searching, the grid shows the matching assignments
-	// instead of a page of the address range.
+	// instead of a page of the address range. The search runs live: what
+	// is typed settles for searchDebounce, then the matches load.
 	searchInput  string // text in the search box
 	searchQuery  string // the text query that produced results
 	searching    bool
-	searchOffset uint64 // index among the matches, not an address offset
+	searchOffset uint64      // index among the matches, not an address offset
+	searchTimer  *time.Timer // the pending live search, nil when none waits
 	results      []ipam.AddressEntry
 	matches      uint64
 	searchMsg    string
@@ -109,6 +113,13 @@ var runOffUI = func(job, fn func()) {
 		job()
 		mygo.RunOnMain(fn)
 	}()
+}
+
+// runSearchDebounce arms the live search's pause: it runs fn on the UI
+// thread once delay has passed without another keystroke. It is a variable
+// so tests run fn right away and keep the state deterministic.
+var runSearchDebounce = func(delay time.Duration, fn func()) *time.Timer {
+	return time.AfterFunc(delay, func() { mygo.RunOnMain(fn) })
 }
 
 // schedule runs job off the UI thread and fn back on it. fn is skipped when
@@ -418,6 +429,7 @@ func (s *ipamState) toggleNetworks(compact bool) {
 
 // resetSearch leaves search mode without reloading.
 func (s *ipamState) resetSearch() {
+	s.stopSearchTimer()
 	s.searching = false
 	s.searchInput = ""
 	s.searchQuery = ""
@@ -427,6 +439,29 @@ func (s *ipamState) resetSearch() {
 	s.searchMsg = ""
 }
 
+// stopSearchTimer drops a live search that has not run yet, so it cannot
+// fire after the state moved on, as to another network.
+func (s *ipamState) stopSearchTimer() {
+	if s.searchTimer != nil {
+		s.searchTimer.Stop()
+		s.searchTimer = nil
+	}
+}
+
+// searchEdited records an edit in the search box and arms the debounced
+// live search: each keystroke pushes the run back, so a burst of typing
+// runs one search once the text settles.
+func (s *ipamState) searchEdited() {
+	s.stopSearchTimer()
+	s.searchTimer = runSearchDebounce(searchDebounce, s.runDueSearch)
+}
+
+// runDueSearch is what the pause fires: it runs what settled in the box.
+func (s *ipamState) runDueSearch() {
+	s.searchTimer = nil
+	s.liveSearch()
+}
+
 func (s *ipamState) clearSearch() {
 	s.resetSearch()
 	if s.store != nil && s.current() != nil {
@@ -434,9 +469,38 @@ func (s *ipamState) clearSearch() {
 	}
 }
 
-// submitSearch runs what is in the search box: a full IPv4 address jumps to
-// it, any other text searches the assignments, empty text clears the search.
+// liveSearch runs what settled in the search box: empty text clears the
+// search, anything else searches the assignments as plain text. It never
+// jumps, so a half-typed address cannot send the grid elsewhere.
+func (s *ipamState) liveSearch() {
+	query := strings.TrimSpace(s.searchInput)
+	if query == "" {
+		if s.searching || s.searchQuery != "" {
+			s.clearSearch()
+		}
+		return
+	}
+	s.searchText(query)
+}
+
+// searchText runs query as an assignment search from the first page of
+// matches. The database work runs off the UI thread.
+func (s *ipamState) searchText(query string) {
+	if s.store == nil || s.current() == nil {
+		return
+	}
+	s.searchMsg = ""
+	s.searching = true
+	s.searchQuery = query
+	s.searchOffset = 0
+	s.loadPage()
+}
+
+// submitSearch runs what is in the search box as Enter submits it: a full
+// IPv4 address jumps to its page, any other text searches the assignments,
+// empty text clears the search. A live search still pending is dropped.
 func (s *ipamState) submitSearch() {
+	s.stopSearchTimer()
 	s.searchMsg = ""
 	query := strings.TrimSpace(s.searchInput)
 	if query == "" {
@@ -450,15 +514,13 @@ func (s *ipamState) submitSearch() {
 		s.jumpTo(addr)
 		return
 	}
-	s.searching = true
-	s.searchQuery = query
-	s.searchOffset = 0
-	s.loadPage()
+	s.searchText(query)
 }
 
 // jumpTo shows the page that holds addr and selects it. The database work
 // runs off the UI thread.
 func (s *ipamState) jumpTo(addr netip.Addr) {
+	s.stopSearchTimer()
 	store := s.store
 	network := s.network
 	var (
@@ -524,6 +586,7 @@ func (s *ipamState) locateEdit() {
 // The database work runs off the UI thread.
 func (s *ipamState) nextFree() {
 	s.searchMsg = ""
+	s.stopSearchTimer()
 	if s.store == nil || s.current() == nil {
 		return
 	}
@@ -912,17 +975,19 @@ func (a *App) ipamNetwork(c *myui.Context, n *ipam.Network, l ipamLayout) {
 		// their old place at the far end, level with the name and icons.
 		cardHeaderStart(c, n.Name, fmt.Sprintf("%s  ·  %d used, %d free of %d",
 			n.CIDR, s.stats.Used, s.stats.Free, s.stats.Total), func() {
-			// The search box, its magnifier and the next-free shortcut,
-			// all standing down while a load is in flight.
-			search := myui.TextInput(c, &s.searchInput).
+			// The search field runs live: results show as the text
+			// settles, Enter runs it straight away (a full IPv4 address
+			// then jumps to its page), and the field's own clear button
+			// or Escape empties it and returns to the address range.
+			// The next-free shortcut stands beside it, standing down
+			// while a load is in flight.
+			search := myui.SearchField(c, &s.searchInput).
+				Label("Search").
 				Placeholder("Search IP, label or owner").
 				Width(260)
 			search.OnSubmit(s.submitSearch)
-			myui.Row(c).Key("search-wrap").Padding(5, 0, 0, 0).Children(func() {
-				iconButton(c, "search", "Search", searchIcon, t.Text, s.busy, s.submitSearch)
-			})
-			if s.searching || s.searchInput != "" {
-				myui.Button(c, "Clear").Key("clear").OnClick(s.clearSearch)
+			if search.Changed() {
+				s.searchEdited()
 			}
 			nextFreeButton := myui.Button(c, "Next free").Key("next-free").Tooltip("Select the next free address").OnClick(s.nextFree)
 			nextFreeButton.Disabled(s.busy)

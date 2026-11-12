@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	myui "github.com/egoist/mygo/ui"
 
@@ -13,11 +14,16 @@ import (
 
 // The IPAM page does its database work on a goroutine and reports back on
 // the UI thread. Tests run the whole round-trip synchronously so the state
-// is deterministic right after a click.
+// is deterministic right after a click. The live search's debounce runs
+// the same way, so typing brings the matches up within the frame.
 func init() {
 	runOffUI = func(job, fn func()) {
 		job()
 		fn()
+	}
+	runSearchDebounce = func(_ time.Duration, fn func()) *time.Timer {
+		fn()
+		return nil
 	}
 }
 
@@ -371,6 +377,64 @@ func TestIPAMPaging(t *testing.T) {
 
 func mustAddr(s string) netip.Addr {
 	return netip.MustParseAddr(s)
+}
+
+func TestIPAMLiveSearch(t *testing.T) {
+	store, _ := openIPAM(t)
+	n, err := store.SaveNetwork("10.0.0.0/24", "Lab")
+	if err != nil {
+		t.Fatalf("SaveNetwork: %v", err)
+	}
+	if err := store.Assign(n.ID, mustAddr("10.0.0.10"), "Printer", "Office"); err != nil {
+		t.Fatalf("Assign: %v", err)
+	}
+
+	a := NewWithStore(store)
+	tt := myui.NewTester(a.View, 1100, 720)
+	if err := tt.Click("IPAM"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Typing in the search box runs the search by itself: no search
+	// button to press.
+	if err := tt.Click("Search"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("printer")
+	tt.Frame()
+	if !a.ipam.searching || a.ipam.searchQuery != "printer" {
+		t.Fatalf("after typing: searching = %v, query = %q; want a live search for printer", a.ipam.searching, a.ipam.searchQuery)
+	}
+	if !tt.HasText("10.0.0.10") {
+		t.Errorf("texts %q do not show the match", tt.Texts())
+	}
+
+	// The field's own clear button empties it and returns to the range.
+	if err := tt.Click("Clear"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.ipam.searching || a.ipam.searchQuery != "" {
+		t.Errorf("after clearing: searching = %v, query = %q; want the address range back", a.ipam.searching, a.ipam.searchQuery)
+	}
+	if !tt.HasText("10.0.0.1") {
+		t.Errorf("texts %q do not show the address range again", tt.Texts())
+	}
+
+	// Enter with a full address still jumps to its page instead of
+	// searching the assignments for it.
+	if err := tt.Click("Search"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("10.0.0.10")
+	tt.Key(0, myui.KeyEnter)
+	tt.Frame()
+	if a.ipam.searching {
+		t.Error("Enter with an address left search mode")
+	}
+	if !a.ipam.editAddr.IsValid() || a.ipam.editAddr.String() != "10.0.0.10" {
+		t.Errorf("editing after Enter = %v, want 10.0.0.10", a.ipam.editAddr)
+	}
 }
 
 func TestIPAMStateErrors(t *testing.T) {
